@@ -1,0 +1,2 @@
+beautifulsoup4==4.12.3
+docx-parser-converter==0.5.1.2
