@@ -1,2 +1,2 @@
-beautifulsoup4==4.12.3
+beautifulsoup4==4.12.3 lxml
 docx-parser-converter==0.5.1.2
