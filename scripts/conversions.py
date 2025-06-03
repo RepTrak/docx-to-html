@@ -101,9 +101,19 @@ class MammothHTMLConverter(Converter):
 
 class PandocHTMLConverter(Converter):
     def convert(self, input_path: str, output_path: str):
+        template_path = os.path.join(os.path.dirname(__file__), "template.html")
         try:
             subprocess.run(
-                ["pandoc", "-f", "docx", "-t", "html", input_path, "-o", output_path],
+                [
+                    "pandoc",
+                    "-f", "docx",
+                    "-t", "html5",
+                    "--template", template_path,
+                    "--section-divs",
+                    "--wrap=none",
+                    input_path,
+                    "-o", output_path,
+                ],
                 check=True
             )
             print(f"[Pandoc] Saved HTML to {output_path}")
