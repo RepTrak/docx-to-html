@@ -1,65 +1,117 @@
+from bs4 import BeautifulSoup, Tag
 import os
-from bs4 import BeautifulSoup
 import re
 
-def clean_html(filepath_in: str, filepath_out: str):
-    with open(filepath_in, "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f, "html.parser")
 
-    for header_row in soup.select("tr.header"):
-        header_row.name = "tr"
-        header_row.attrs.pop("class", None)
-        for th in header_row.find_all("th"):
-            th.name = "td"
+class HTMLCleaner:
+    ALLOWED_STYLES = {"color"}
 
-    for tr in soup.select("tr"):
-        tr.attrs.pop("class", None)
+    def __init__(self, filepath_in, filepath_out):
+        self.filepath_in = filepath_in
+        self.filepath_out = filepath_out
+        with open(filepath_in, "r", encoding="utf-8") as f:
+            self.soup = BeautifulSoup(f, "html.parser")
 
-    question_pattern = re.compile(r"^(Q\d{3}(\/\d+)?):", re.IGNORECASE)
-    all_elements = soup.select("section > *")
-    i = 0
-    while i < len(all_elements):
-        el = all_elements[i]
-        match = el.get_text(strip=True)
-        qmatch = question_pattern.match(match if match else "")
-        if qmatch:
-            qcode = qmatch.group(1)
-            wrapper = soup.new_tag("div", attrs={"class": "question", "data-code": qcode})
-            start_el = all_elements[i]
-            parent = start_el.parent
-            insert_index = list(parent.children).index(start_el)
+    def clean_styles(self):
+        for tag in self.soup.find_all(True):
+            if tag.has_attr("style"):
+                cleaned_styles = []
+                for item in tag["style"].split(";"):
+                    if ":" not in item:
+                        continue
+                    key, value = item.split(":", 1)
+                    key = key.strip().lower()
+                    if key in self.ALLOWED_STYLES:
+                        cleaned_styles.append(f"{key}: {value.strip()}")
+                if cleaned_styles:
+                    tag["style"] = "; ".join(cleaned_styles)
+                else:
+                    del tag["style"]
 
-            # First insert the empty wrapper at the correct position
-            parent.insert(insert_index, wrapper)
-            
-            # Now move elements into the wrapper
-            while i < len(all_elements):
-                next_el = all_elements[i]
-                # Need to get the element again since the DOM has changed
-                current_el = parent.contents[insert_index + 1] if (insert_index + 1) < len(parent.contents) else None
-                if current_el:
-                    wrapper.append(current_el.extract())
-                
-                # Check if we should stop
-                if next_el.name == "p" and "RESPONDENT MUST" in next_el.get_text():
-                    break
-                if next_el.name == "table":
-                    peek = all_elements[i + 1] if i + 1 < len(all_elements) else None
-                    if not peek or peek.name not in {"table", "p"}:
-                        break
+    def remove_unwanted_attributes(self):
+        for tag in self.soup.find_all(True):
+            for attr in ["width", "align", "size", "cellpadding", "cellspacing", "valign", "height"]:
+                tag.attrs.pop(attr, None)
+
+    def unwrap_fonts_preserve_color(self):
+        for font in self.soup.find_all("font"):
+            color = font.get("color")
+            contents = font.contents
+            if color:
+                span = self.soup.new_tag("span", style=f"color: {color}")
+                for content in contents:
+                    span.append(content)
+                font.replace_with(span)
+            else:
+                font.unwrap()
+
+    def remove_empty_paragraphs(self):
+        for p in self.soup.find_all("p"):
+            if not p.get_text(strip=True):
+                p.decompose()
+
+    def wrap_question_blocks(self):
+        question_pattern = re.compile(r"(Q\d{3}(?:/\d+)?):", re.IGNORECASE)
+        body = self.soup.body
+        if not body:
+            return
+        elements = list(body.children)
+        i = 0
+        while i < len(elements):
+            el = elements[i]
+            if not isinstance(el, Tag):
                 i += 1
-        else:
-            i += 1
+                continue
 
-    with open(filepath_out, "w", encoding="utf-8") as f:
-        f.write(str(soup.prettify()))
+            text = el.get_text(strip=True)
+            match = question_pattern.search(text)
+            if match:
+                qcode = match.group(1)
+                wrapper = self.soup.new_tag("div", attrs={"class": "question", "data-code": qcode})
+                el.insert_before(wrapper)
 
-    print(f"Cleaned HTML written to {filepath_out}")
+                moved_elements = 0
+                while i < len(elements):
+                    current_el = elements[i]
+                    if not isinstance(current_el, Tag):
+                        i += 1
+                        continue
+                    wrapper.append(current_el.extract())
+                    moved_elements += 1
 
-if __name__ == "__main__":
-    folder = "../data/html_output"
-    for name in os.listdir(folder):
-        if name.endswith("_pandoc.html"):
-            input_path = os.path.join(folder, name)
-            output_path = input_path.replace("_pandoc.html", "_cleaned.html")
-            clean_html(input_path, output_path)
+                    if "RESPONDENT MUST" in current_el.get_text():
+                        break
+                    if current_el.name == "table":
+                        if i + 1 >= len(elements) or elements[i + 1].name not in {"table", "p"}:
+                            break
+                    i += 1
+
+                if moved_elements == 0:
+                    wrapper.decompose()
+            else:
+                i += 1
+
+    def write(self):
+        with open(self.filepath_out, "w", encoding="utf-8") as f:
+            f.write(self.soup.prettify())
+        print(f"Cleaned HTML written to {self.filepath_out}")
+
+    def run_all(self):
+        self.clean_styles()
+        self.remove_unwanted_attributes()
+        self.unwrap_fonts_preserve_color()
+        self.remove_empty_paragraphs()
+        self.wrap_question_blocks()
+        self.write()
+
+
+def batch_clean_html(folder_path):
+    for name in os.listdir(folder_path):
+        if name.endswith(".html") and not name.endswith("_cleaned.html"):
+            input_path = os.path.join(folder_path, name)
+            output_path = input_path.replace(".html", "_cleaned.html")
+            cleaner = HTMLCleaner(input_path, output_path)
+            cleaner.run_all()
+
+
+batch_clean_html("/home/jliu/docx-to-html/data/html_output/")
