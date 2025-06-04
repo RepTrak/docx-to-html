@@ -2,7 +2,6 @@ from bs4 import BeautifulSoup, Tag
 import os
 import re
 
-
 class HTMLCleaner:
     ALLOWED_STYLES = {"color"}
 
@@ -51,23 +50,32 @@ class HTMLCleaner:
                 p.decompose()
 
     def wrap_question_blocks(self):
-        question_pattern = re.compile(r"(Q\d{3}(?:/\d+)?):", re.IGNORECASE)
         body = self.soup.body
         if not body:
             return
+
         elements = list(body.children)
         i = 0
+        question_pattern = re.compile(r"([A-Z0-9_]+)(?:\s*\[([A-Z0-9_]+)\])?:", re.IGNORECASE)
+
         while i < len(elements):
             el = elements[i]
-            if not isinstance(el, Tag):
+            if not isinstance(el, Tag) or not el.get_text(strip=True):
                 i += 1
                 continue
 
             text = el.get_text(strip=True)
-            match = question_pattern.search(text)
+            match = question_pattern.match(text)
             if match:
-                qcode = match.group(1)
-                wrapper = self.soup.new_tag("div", attrs={"class": "question", "data-code": qcode})
+                code = match.group(1)
+                qtype = match.group(2) if match.group(2) else "CHOICE"
+
+                wrapper = self.soup.new_tag("div", attrs={
+                    "class": "question",
+                    "data-code": code,
+                    "data-type": qtype
+                })
+
                 el.insert_before(wrapper)
 
                 moved_elements = 0
@@ -76,6 +84,7 @@ class HTMLCleaner:
                     if not isinstance(current_el, Tag):
                         i += 1
                         continue
+
                     wrapper.append(current_el.extract())
                     moved_elements += 1
 
@@ -104,7 +113,6 @@ class HTMLCleaner:
         self.wrap_question_blocks()
         self.write()
 
-
 def batch_clean_html(folder_path):
     for name in os.listdir(folder_path):
         if name.endswith(".html") and not name.endswith("_cleaned.html"):
@@ -113,5 +121,4 @@ def batch_clean_html(folder_path):
             cleaner = HTMLCleaner(input_path, output_path)
             cleaner.run_all()
 
-
-batch_clean_html("/home/jliu/docx-to-html/data/html_output/")
+batch_clean_html("/home/jliu/docx-to-html/data/html_output")
