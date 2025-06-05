@@ -1,19 +1,44 @@
 # docx-to-html
-Converting .docx to .html
+Converting `.docx` files to structured `.html` for JSON transformation.
 
-Exploring tools like BeautifulSoup or docx-parser-converter, may also attempt to convert from .docx to .pdf to .html, or .docx to .xml to .html.
+This project aims to preserve key hierarchy information from text such as:
 
-Running Python 3.10.0
+- **Text hierarchy** (headings, bold/italic text)  
+- **Tables with labeled structure**  
+- **Question and response formatting**  
+- **Style-based information** (such as text color used to infer question code vs. type)
 
-The class using docx_parser_converter is currently blocked and unable to correctly convert from .docx to .html
+---
 
-The class using Beautiful Soup is currently working and able to produce .html files. However, it is too lossy to be feasible (output .html file does not retain any text formatting or hierarchy). Will attempt to rewrite the script to make a smarter converter.
+**Step 1: Conversion**
 
-The Pandoc and Mammoth methods look more promising right now, they are able to maintain a decent amount of text hierarchy and table structures.
+- Currently, [**online-convert.com**](https://document.online-convert.com/convert/docx-to-html) is used to convert `.docx` files to `.html`. This uses **LibreOffice** under the hood.
+- An API wrapper for LibreOffice is in development to automate this step.
+- Running Python 3.10.0
 
-The PyPI pandoc package is just a wrapper, and the Pandoc CLI must be separately installed in order for the class to work.
+---
 
-To install Pandoc 3.1.13:
+**Step 2: Post-processing**
+
+The `clean_html.py` script post-processes the obtained `.html` file by removing extraneous formatting and using standardized conventions to structure the content:
+
+- **Strip extraneous inline styles** (retaining only `color`)
+- **Remove deprecated HTML attributes** and empty tags
+- **Wrap each question** in a `<div class="question">` with `data-code` and `data-type` attributes
+- **Tag unlabeled or out-of-place content** as `MISC`
+- **Extract and label tables** as `VARIABLES TABLE`, `COLUMNS TABLE`, or `OTHER TABLE`
+- **Normalize question variable names** in tables (e.g., `Q320_1` → `1`)
+- **Preserve Programmer Notes** and associate them with the correct question as `EXTRA`
+
+The result is a `.html` file that can be interpreted by an LLM to produce a valid JSON schema.
+
+---
+
+**Pandoc (Optional)**
+
+Though not currently used in the pipeline, pandoc is a backup tool to convert .docx to .html. 
+
+To manually install Pandoc 3.1.13:
 
 ```bash
 cd /usr/local/bin
