@@ -71,13 +71,19 @@ class HTMLCleaner:
                     if match:
                         cells[0].string = match.group(1)
 
+    def remove_language_and_class_attrs(self):
+        for tag in self.soup.find_all(True):
+            if tag.get("lang") == "en-US":
+                del tag["lang"]
+            if tag.get("class") == ["western"]:
+                del tag["class"]
+
     def wrap_questions(self):
         question_pattern = re.compile(r"(?P<code>\w+)\s*\[(?P<type>\w+)]\s*:")
         body = self.soup.body
         if not body:
             return
-
-        # Convert to list once and work with indices carefully
+    
         elements = list(body.children)
         i = 0
         while i < len(elements):
@@ -94,8 +100,7 @@ class HTMLCleaner:
                 wrapper = self.soup.new_tag("div", attrs={"class": "question", "data-code": code, "data-type": qtype})
                 el.insert_before(wrapper)
                 wrapper.append(el.extract())
-                
-                # Process subsequent elements until divider or end
+
                 j = i
                 while j < len(elements) - 1:
                     next_el = elements[j + 1]
@@ -105,11 +110,9 @@ class HTMLCleaner:
                     wrapper.append(next_el.extract())
                     j += 1
                 
-                # Update elements list and continue from next position
                 elements = list(body.children)
                 i = j + 1
             else:
-                # Handle non-question elements
                 if not any(parent.name == 'div' and 'question' in parent.get('class', []) for parent in el.parents):
                     misc_wrapper = self.soup.new_tag("div", attrs={"class": "misc"})
                     el.insert_before(misc_wrapper)
@@ -122,6 +125,7 @@ class HTMLCleaner:
         self.clean_styles_and_attrs()
         self.unwrap_fonts()
         self.remove_empty_paragraphs()
+        self.remove_language_and_class_attrs()
         self.mark_tables()
         self.strip_table_prefixes()
         self.wrap_questions()
