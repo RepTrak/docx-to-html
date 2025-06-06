@@ -46,6 +46,36 @@ class HTMLCleaner:
             if not p.get_text(strip=True):
                 p.decompose()
 
+    def wrap_sections(self):
+        section_pattern = re.compile(r"Section\s+(\d{3,4})\s*[-–—]?\s*(.*)", re.IGNORECASE)
+        body = self.soup.body
+        if not body:
+            return
+
+        elements = list(body.children)
+        i = 0
+        while i < len(elements):
+            el = elements[i]
+            if not isinstance(el, Tag):
+                i += 1
+                continue
+
+            match = section_pattern.match(el.get_text(strip=True))
+            if el.name in {"h1", "h2", "p"} and match:
+                section_code = match.group(1)
+                section_label = match.group(2).strip()
+                section_id = f"section-{section_code.lower()}"
+                wrapper = self.soup.new_tag("div", attrs={"id": section_id, "class": "section"})
+
+                print(f"→ Wrapping section {section_code}: {section_label}")
+                el.insert_before(wrapper)
+                wrapper.append(el.extract())
+
+                i += 1
+                elements = list(body.children)
+            else:
+                i += 1
+
     def mark_tables(self):
         table_labels = {"VARIABLES TABLE", "COLUMNS TABLE"}
         last_label = None
@@ -119,18 +149,38 @@ class HTMLCleaner:
                     misc_wrapper.append(el.extract())
                     elements = list(body.children)
                 i += 1
+    
+    def compress_table_cells(self):
+        for table in self.soup.find_all("table"):
+            for td in table.find_all("td"):
+                if len(td.contents) == 1 and isinstance(td.contents[0], Tag) and td.contents[0].name == "p":
+                    p = td.contents[0]
+                    if len(p.contents) == 1 and isinstance(p.contents[0], Tag) and p.contents[0].name == "b":
+                        td.clear()
+                        td.append(p.contents[0])
+                    elif len(p.contents) == 1 and isinstance(p.contents[0], str):
+                        td.string = p.contents[0]
+                    else:
+                        td.clear()
+                        for child in p.contents:
+                            td.append(child)
+                elif all(isinstance(child, Tag) and child.name == "p" for child in td.contents):
+                    flat_text = " ".join(p.get_text(strip=True) for p in td.find_all("p"))
+                    td.clear()
+                    td.string = flat_text
 
     def clean(self):
         self.load_html()
         self.clean_styles_and_attrs()
         self.unwrap_fonts()
         self.remove_empty_paragraphs()
-        self.remove_language_and_class_attrs()
+        self.wrap_sections()
         self.mark_tables()
         self.strip_table_prefixes()
         self.wrap_questions()
+        self.compress_table_cells()
+        self.remove_language_and_class_attrs()
         self.save_html()
-
 
 def batch_clean_html(folder):
     for name in os.listdir(folder):
