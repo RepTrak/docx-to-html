@@ -2,7 +2,7 @@
 
 INPUT_DIR="/home/jliu/docx-to-html/data/docx_input"
 OUTPUT_DIR="/home/jliu/docx-to-html/data/html_output"
-IMAGE="jagregory/libreoffice"
+IMAGE="linuxserver/libreoffice"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -11,11 +11,13 @@ for docx_file in "$INPUT_DIR"/*.docx; do
     filename=$(basename "$docx_file")
     echo "→ Converting: $filename"
 
-    docker run --rm \
-      -v "$INPUT_DIR":/data \
-      -v "$OUTPUT_DIR":/out \
-      "$IMAGE" \
-      --headless --convert-to html:"HTML (StarWriter)" --outdir /out "/data/$filename"
+docker run --rm \
+  -v "$INPUT_DIR":/input \
+  -v "$OUTPUT_DIR":/output \
+  "$IMAGE" \
+  libreoffice --headless --convert-to html:"HTML (StarWriter)" --outdir /output /input/"$filename"
+
+
   fi
 done
 
