@@ -10,11 +10,18 @@ This project aims to preserve key hierarchy information from text such as:
 
 ---
 
-**Step 1: Conversion**
+## Step 1: Conversion
 
-- Currently, [**online-convert.com**](https://document.online-convert.com/convert/docx-to-html) is used to convert `.docx` files to `.html`. This uses **LibreOffice** under the hood.
-- An API wrapper for LibreOffice is in development to automate this step.
-- Running Python 3.10.0
+LibreOffice is used to convert `.docx` files to `.html`. This process is automated through a Docker-based Python wrapper that runs LibreOffice inside a container.
+
+- All `.docx` files located in `/home/jliu/docx-to-html/data/docx_input` will be converted.
+- The resulting `.html` files are saved to `/home/jliu/docx-to-html/data/html_output`.
+
+An API wrapper for LibreOffice is currently in development for enhanced control over conversion formats.
+
+> Requires: Docker installed and user added to the `docker` group.
+
+Running Python 3.12.0
 
 ---
 
