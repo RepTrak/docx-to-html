@@ -1,5 +1,5 @@
 # docx-to-html
-Converting `.docx` files to structured `.html` for JSON transformation.
+Converting `.docx` files to structured `.html` for JSON transformation. Running Python 3.12.0.
 
 This project aims to preserve key hierarchy information from text such as:
 
@@ -7,6 +7,12 @@ This project aims to preserve key hierarchy information from text such as:
 - **Tables with labeled structure**  
 - **Question and response formatting**  
 - **Style-based information** (such as text color used to infer question code vs. type)
+
+The following file is currently being used for testing purposes: `svb_qnr_-_main_-_english__february_2024_for_ingestion.docx`
+
+Tutorial for downloading Docker on CentOs Stream 10: `docx-to-html/docker-setup.md`
+
+A list of the various conventions used in the SVB .docx file for custom .html postprocessing: `docx-to-html/conventions.md`
 
 ---
 
@@ -17,11 +23,7 @@ LibreOffice is used to convert `.docx` files to `.html`. This process is automat
 - All `.docx` files located in `/home/jliu/docx-to-html/data/docx_input` will be converted.
 - The resulting `.html` files are saved to `/home/jliu/docx-to-html/data/html_output`.
 
-An API wrapper for LibreOffice is currently in development for enhanced control over conversion formats.
-
 > Requires: Docker installed and user added to the `docker` group.
-
-Running Python 3.12.0
 
 ---
 
