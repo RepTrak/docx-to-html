@@ -97,7 +97,7 @@ class HTMLCleaner:
                 cells = row.find_all("td")
                 if len(cells) > 0:
                     cell_text = cells[0].get_text(strip=True)
-                    match = re.match(r"Q\d{3}_(\d+)", cell_text)
+                    match = re.match(r"Q\d{1,4}_(\d+)", cell_text)
                     if match:
                         cells[0].string = match.group(1)
 
@@ -109,11 +109,12 @@ class HTMLCleaner:
                 del tag["class"]
 
     def wrap_questions(self):
-        question_pattern = re.compile(r"(?P<code>\w+)\s*\[(?P<type>\w+)]\s*:")
+        question_pattern = re.compile(r"(?P<code>Q[\w\d_]+)")
+        type_pattern = re.compile(r"\[(?P<type>\w+)]")
         body = self.soup.body
         if not body:
             return
-    
+
         elements = list(body.children)
         i = 0
         while i < len(elements):
@@ -122,34 +123,73 @@ class HTMLCleaner:
                 i += 1
                 continue
 
-            match = question_pattern.search(el.get_text())
-            if match:
-                code = match.group("code")
-                qtype = match.group("type")
-                print(f"→ Wrapping question block with code={code} and type={qtype}")
-                wrapper = self.soup.new_tag("div", attrs={"class": "question", "data-code": code, "data-type": qtype})
-                el.insert_before(wrapper)
-                wrapper.append(el.extract())
+            text = el.get_text(strip=True)
+            question_match = question_pattern.search(text)
+            type_match = type_pattern.search(text)
 
-                j = i
-                while j < len(elements) - 1:
-                    next_el = elements[j + 1]
-                    if isinstance(next_el, Tag) and next_el.get_text(strip=True) == "===":
-                        wrapper.append(next_el.extract())
-                        break
-                    wrapper.append(next_el.extract())
-                    j += 1
-                
+            if question_match and type_match and el.name == "p":
+                code = question_match.group("code")
+                qtype = type_match.group("type")
+                print(f"→ Wrapping question block with code={code}, type={qtype}")
+
+                wrapper = self.soup.new_tag("div", attrs={"class": f"question{code}", "id": qtype})
+                label_div = self.soup.new_tag("div", attrs={"class": "label"})
+                wrapper.append(label_div)
+
+                # add the first p tag with question header
+                label_div.append(el.extract())
                 elements = list(body.children)
-                i = j + 1
+
+                # gather all label lines until we hit ===
+                while i < len(elements):
+                    next_el = elements[i]
+                    if not isinstance(next_el, Tag):
+                        i += 1
+                        continue
+                    if next_el.get_text(strip=True) == "===":
+                        label_div.append(next_el.extract())
+                        i += 1
+                        break
+                    label_div.append(next_el.extract())
+                    elements = list(body.children)
+
+                # gather all content lines until next Q/code or section or anchor tag
+                content_div = self.soup.new_tag("div", attrs={"class": "content"})
+                while i < len(elements):
+                    next_el = elements[i]
+                    if not isinstance(next_el, Tag):
+                        i += 1
+                        continue
+
+                    text = next_el.get_text(strip=True)
+                    is_new_question = question_pattern.search(text)
+                    is_section = next_el.name in {"h1", "h2"} or (next_el.name == "p" and "Section" in text)
+                    has_anchor = next_el.find("a") and next_el.find("a").has_attr("name") and next_el.find("a")["name"].startswith("_Hlk")
+
+                    if is_new_question or is_section or has_anchor:
+                        break
+
+                    content_div.append(next_el.extract())
+                    elements = list(body.children)
+
+                if content_div.contents:
+                    wrapper.append(content_div)
+
+                # insert wrapper before next_el if it still exists
+                if i < len(elements):
+                    elements[i].insert_before(wrapper)
+                else:
+                    body.append(wrapper)
+
             else:
-                if not any(parent.name == 'div' and 'question' in parent.get('class', []) for parent in el.parents):
+                if not any(parent.name == 'div' and 'question' in ''.join(parent.get('class', [])) for parent in el.parents):
                     misc_wrapper = self.soup.new_tag("div", attrs={"class": "misc"})
                     el.insert_before(misc_wrapper)
                     misc_wrapper.append(el.extract())
                     elements = list(body.children)
                 i += 1
-    
+
+
     def compress_table_cells(self):
         for table in self.soup.find_all("table"):
             for td in table.find_all("td"):
@@ -181,6 +221,7 @@ class HTMLCleaner:
         self.compress_table_cells()
         self.remove_language_and_class_attrs()
         self.save_html()
+
 
 def batch_clean_html(folder):
     for name in os.listdir(folder):
