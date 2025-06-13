@@ -115,79 +115,125 @@ class HTMLCleaner:
         if not body:
             return
 
-        elements = list(body.children)
-        i = 0
-        while i < len(elements):
-            el = elements[i]
-            if not isinstance(el, Tag):
-                i += 1
-                continue
+        def is_end_line(tag):
+            return (
+                isinstance(tag, Tag)
+                and tag.name == "p"
+                and tag.get("lang") == "en-US"
+                and tag.get("class") == ["western"]
+                and tag.get("style") == "line-height: 100%; margin-bottom: 0in"
+            )
 
+        # First collect all question elements and their positions
+        question_elements = []
+        for i, el in enumerate(body.children):
+            if not isinstance(el, Tag):
+                continue
+            text = el.get_text(strip=True)
+            if (question_pattern.search(text) and 
+                type_pattern.search(text) and 
+                el.name == "p"):
+                question_elements.append((i, el))
+
+        # Create a list to hold processed questions
+        processed_questions = []
+
+        # Process each question block in forward order
+        for start_idx, el in question_elements:
+            # Get fresh elements list
+            elements = list(body.children)
+            if start_idx >= len(elements) or elements[start_idx] != el:
+                continue  # Skip if already processed
+                
             text = el.get_text(strip=True)
             question_match = question_pattern.search(text)
             type_match = type_pattern.search(text)
+            
+            if not (question_match and type_match):
+                continue
+                
+            code = question_match.group("code")
+            qtype = type_match.group("type")
+            print(f"→ Wrapping question block with code={code}, type={qtype}")
 
-            if question_match and type_match and el.name == "p":
-                code = question_match.group("code")
-                qtype = type_match.group("type")
-                print(f"→ Wrapping question block with code={code}, type={qtype}")
+            # Create wrapper
+            wrapper = self.soup.new_tag("div", attrs={"class": f"question{code}", "id": qtype})
+            label_div = self.soup.new_tag("div", attrs={"class": "label"})
+            wrapper.append(label_div)
 
-                wrapper = self.soup.new_tag("div", attrs={"class": f"question{code}", "id": qtype})
-                label_div = self.soup.new_tag("div", attrs={"class": "label"})
-                wrapper.append(label_div)
+            # Add header line
+            label_div.append(el.extract())
 
-                # add the first p tag with question header
-                label_div.append(el.extract())
-                elements = list(body.children)
-
-                # gather all label lines until we hit ===
-                while i < len(elements):
-                    next_el = elements[i]
-                    if not isinstance(next_el, Tag):
-                        i += 1
-                        continue
-                    if next_el.get_text(strip=True) == "===":
-                        label_div.append(next_el.extract())
-                        i += 1
-                        break
+            # Collect label content until ===
+            i = start_idx
+            while i < len(elements):
+                next_el = elements[i]
+                if not isinstance(next_el, Tag):
+                    i += 1
+                    continue
+                if next_el.get_text(strip=True) == "===":
                     label_div.append(next_el.extract())
-                    elements = list(body.children)
-
-                # gather all content lines until next Q/code or section or anchor tag
-                content_div = self.soup.new_tag("div", attrs={"class": "content"})
-                while i < len(elements):
-                    next_el = elements[i]
-                    if not isinstance(next_el, Tag):
-                        i += 1
-                        continue
-
-                    text = next_el.get_text(strip=True)
-                    is_new_question = question_pattern.search(text)
-                    is_section = next_el.name in {"h1", "h2"} or (next_el.name == "p" and "Section" in text)
-                    has_anchor = next_el.find("a") and next_el.find("a").has_attr("name") and next_el.find("a")["name"].startswith("_Hlk")
-
-                    if is_new_question or is_section or has_anchor:
-                        break
-
-                    content_div.append(next_el.extract())
-                    elements = list(body.children)
-
-                if content_div.contents:
-                    wrapper.append(content_div)
-
-                # insert wrapper before next_el if it still exists
-                if i < len(elements):
-                    elements[i].insert_before(wrapper)
-                else:
-                    body.append(wrapper)
-
-            else:
-                if not any(parent.name == 'div' and 'question' in ''.join(parent.get('class', [])) for parent in el.parents):
-                    misc_wrapper = self.soup.new_tag("div", attrs={"class": "misc"})
-                    el.insert_before(misc_wrapper)
-                    misc_wrapper.append(el.extract())
-                    elements = list(body.children)
+                    break
+                label_div.append(next_el.extract())
                 i += 1
+
+            # Collect content until end marker or next question start
+            content_div = self.soup.new_tag("div", attrs={"class": "content"})
+            next_question_pos = None
+            # Find position of next question
+            for q_pos, q_el in question_elements:
+                if q_pos > start_idx:
+                    next_question_pos = q_pos
+                    break
+                
+            while i < len(elements):
+                next_el = elements[i]
+                if not isinstance(next_el, Tag):
+                    i += 1
+                    continue
+                    
+                # Check if we've reached the next question
+                if next_question_pos and i >= next_question_pos:
+                    break
+                    
+                # Check for end marker
+                if is_end_line(next_el):
+                    next_el.extract()
+                    break
+                    
+                content_div.append(next_el.extract())
+                i += 1
+
+            if content_div.contents:
+                wrapper.append(content_div)
+
+            # Add to processed questions
+            processed_questions.append(wrapper)
+
+        # Clear body and add processed questions in order
+        body.clear()
+        for question in processed_questions:
+            body.append(question)
+
+        # Add any remaining non-question content to misc
+        elements = list(body.children)
+        misc_content = []
+        for el in elements:
+            if not isinstance(el, Tag):
+                continue
+                
+            # Skip if already in a question div
+            if any(parent.name == 'div' and 'question' in ''.join(parent.get('class', [])) 
+                for parent in el.parents):
+                continue
+                
+            misc_content.append(el.extract())
+
+        if misc_content:
+            misc_wrapper = self.soup.new_tag("div", attrs={"class": "misc"})
+            body.append(misc_wrapper)
+            for el in misc_content:
+                misc_wrapper.append(el)
 
 
     def compress_table_cells(self):
