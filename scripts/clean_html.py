@@ -180,7 +180,7 @@ class HTMLCleaner:
             print(f"→ Wrapping question block with code={question['code']}, type={question['type']}")
             
             wrapper = self.soup.new_tag("div", attrs={
-                "class": f"question{question['code']}", 
+                "class": question['code'], 
                 "id": question['type']
             })
             
