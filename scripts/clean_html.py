@@ -116,8 +116,6 @@ class HTMLCleaner:
                 del tag["class"]
 
     def wrap_questions(self):
-        question_pattern = re.compile(r"(?P<code>Q[\w\d_]+)")
-        type_pattern = re.compile(r"\[(?P<type>\w+)]")
         body = self.soup.body
         if not body:
             return
@@ -141,17 +139,33 @@ class HTMLCleaner:
                 continue
                 
             text = el.get_text(strip=True)
-            question_match = question_pattern.search(text)
-            type_match = type_pattern.search(text)
             
-            # Start of new question
-            if question_match and type_match and el.name == "p":
+            # Detect question header line (contains [TYPE] marker)
+            type_match = re.search(r"\[(\w+)\]", text)
+            if type_match and el.name == "p":
                 if current_question:
                     questions.append(current_question)
+                
+                # Extract question code (everything before [TYPE])
+                question_code = text.split('[')[0].strip()
+                question_type = type_match.group(1)
+                
                 current_question = {
                     'start': i,
-                    'code': question_match.group("code"),
-                    'type': type_match.group("type"),
+                    'code': question_code,
+                    'type': question_type,
+                    'label_elements': [el],
+                    'content_elements': []
+                }
+            elif not type_match and el.name == "p" and not current_question:
+                # Default question type (CHOICE) when no [] is present
+                question_code = text.strip()
+                question_type = "CHOICE"
+                
+                current_question = {
+                    'start': i,
+                    'code': question_code,
+                    'type': question_type,
                     'label_elements': [el],
                     'content_elements': []
                 }
@@ -199,7 +213,7 @@ class HTMLCleaner:
             
             body.append(wrapper)
         
-        # Handle any remaining elements (shouldn't be any in proper format)
+        # Handle any remaining elements
         remaining = [el for el in elements if el not in 
                     [el for q in questions for el in q['label_elements'] + q['content_elements']]]
         
