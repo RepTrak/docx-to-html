@@ -44,7 +44,14 @@ class HTMLCleaner:
     def remove_empty_paragraphs(self):
         for p in self.soup.find_all("p"):
             if not p.get_text(strip=True):
+                if (
+                    p.get("lang") == "en-US"
+                    and p.get("class") == ["western"]
+                    and p.get("style") == "line-height: 100%; margin-bottom: 0in"
+                ):
+                    continue
                 p.decompose()
+
 
     def wrap_sections(self):
         section_pattern = re.compile(r"Section\s+(\d{3,4})\s*[-–—]?\s*(.*)", re.IGNORECASE)
@@ -124,116 +131,85 @@ class HTMLCleaner:
                 and tag.get("style") == "line-height: 100%; margin-bottom: 0in"
             )
 
-        # First collect all question elements and their positions
-        question_elements = []
-        for i, el in enumerate(body.children):
+        # First collect all question ranges
+        questions = []
+        current_question = None
+        elements = list(body.children)
+        
+        for i, el in enumerate(elements):
             if not isinstance(el, Tag):
                 continue
-            text = el.get_text(strip=True)
-            if (question_pattern.search(text) and 
-                type_pattern.search(text) and 
-                el.name == "p"):
-                question_elements.append((i, el))
-
-        # Create a list to hold processed questions
-        processed_questions = []
-
-        # Process each question block in forward order
-        for start_idx, el in question_elements:
-            # Get fresh elements list
-            elements = list(body.children)
-            if start_idx >= len(elements) or elements[start_idx] != el:
-                continue  # Skip if already processed
                 
             text = el.get_text(strip=True)
             question_match = question_pattern.search(text)
             type_match = type_pattern.search(text)
             
-            if not (question_match and type_match):
-                continue
-                
-            code = question_match.group("code")
-            qtype = type_match.group("type")
-            print(f"→ Wrapping question block with code={code}, type={qtype}")
+            # Start of new question
+            if question_match and type_match and el.name == "p":
+                if current_question:
+                    questions.append(current_question)
+                current_question = {
+                    'start': i,
+                    'code': question_match.group("code"),
+                    'type': type_match.group("type"),
+                    'label_elements': [el],
+                    'content_elements': []
+                }
+            elif current_question:
+                # Still collecting label until ===
+                if not current_question.get('label_complete'):
+                    if text == "===":
+                        current_question['label_elements'].append(el)
+                        current_question['label_complete'] = True
+                    else:
+                        current_question['label_elements'].append(el)
+                # Collecting content until end marker
+                elif not current_question.get('content_complete'):
+                    if is_end_line(el):
+                        current_question['content_complete'] = True
+                    else:
+                        current_question['content_elements'].append(el)
+        
+        if current_question:
+            questions.append(current_question)
 
-            # Create wrapper
-            wrapper = self.soup.new_tag("div", attrs={"class": f"question{code}", "id": qtype})
-            label_div = self.soup.new_tag("div", attrs={"class": "label"})
-            wrapper.append(label_div)
-
-            # Add header line
-            label_div.append(el.extract())
-
-            # Collect label content until ===
-            i = start_idx
-            while i < len(elements):
-                next_el = elements[i]
-                if not isinstance(next_el, Tag):
-                    i += 1
-                    continue
-                if next_el.get_text(strip=True) == "===":
-                    label_div.append(next_el.extract())
-                    break
-                label_div.append(next_el.extract())
-                i += 1
-
-            # Collect content until end marker or next question start
-            content_div = self.soup.new_tag("div", attrs={"class": "content"})
-            next_question_pos = None
-            # Find position of next question
-            for q_pos, q_el in question_elements:
-                if q_pos > start_idx:
-                    next_question_pos = q_pos
-                    break
-                
-            while i < len(elements):
-                next_el = elements[i]
-                if not isinstance(next_el, Tag):
-                    i += 1
-                    continue
-                    
-                # Check if we've reached the next question
-                if next_question_pos and i >= next_question_pos:
-                    break
-                    
-                # Check for end marker
-                if is_end_line(next_el):
-                    next_el.extract()
-                    break
-                    
-                content_div.append(next_el.extract())
-                i += 1
-
-            if content_div.contents:
-                wrapper.append(content_div)
-
-            # Add to processed questions
-            processed_questions.append(wrapper)
-
-        # Clear body and add processed questions in order
+        # Clear body and rebuild with wrapped questions
         body.clear()
-        for question in processed_questions:
-            body.append(question)
-
-        # Add any remaining non-question content to misc
-        elements = list(body.children)
-        misc_content = []
-        for el in elements:
-            if not isinstance(el, Tag):
-                continue
-                
-            # Skip if already in a question div
-            if any(parent.name == 'div' and 'question' in ''.join(parent.get('class', [])) 
-                for parent in el.parents):
-                continue
-                
-            misc_content.append(el.extract())
-
-        if misc_content:
+        
+        for question in questions:
+            print(f"→ Wrapping question block with code={question['code']}, type={question['type']}")
+            
+            wrapper = self.soup.new_tag("div", attrs={
+                "class": f"question{question['code']}", 
+                "id": question['type']
+            })
+            
+            # Add label div
+            label_div = self.soup.new_tag("div", attrs={"class": "label"})
+            for el in question['label_elements']:
+                label_div.append(el)
+            wrapper.append(label_div)
+            
+            # Add content div if there's content
+            if question['content_elements']:
+                content_div = self.soup.new_tag("div", attrs={"class": "content"})
+                for el in question['content_elements']:
+                    content_div.append(el)
+                wrapper.append(content_div)
+            
+            body.append(wrapper)
+        
+        # Handle any remaining elements (shouldn't be any in proper format)
+        remaining = [el for el in elements if el not in 
+                    [el for q in questions for el in q['label_elements'] + q['content_elements']]]
+        
+        if remaining:
             misc_wrapper = self.soup.new_tag("div", attrs={"class": "misc"})
+            for el in remaining:
+                if isinstance(el, Tag):
+                    misc_wrapper.append(el)
             body.append(misc_wrapper)
-            for el in misc_content:
-                misc_wrapper.append(el)
+
 
 
     def compress_table_cells(self):
@@ -259,14 +235,15 @@ class HTMLCleaner:
         self.load_html()
         self.clean_styles_and_attrs()
         self.unwrap_fonts()
-        self.remove_empty_paragraphs()
         self.wrap_sections()
         self.mark_tables()
         self.strip_table_prefixes()
         self.wrap_questions()
+        self.remove_empty_paragraphs()
         self.compress_table_cells()
         self.remove_language_and_class_attrs()
         self.save_html()
+
 
 
 def batch_clean_html(folder):
