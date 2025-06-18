@@ -120,6 +120,8 @@ class HTMLCleaner:
         if not body:
             return
 
+        elements = list(body.children)
+
         def is_end_line(tag):
             return (
                 isinstance(tag, Tag)
@@ -129,100 +131,99 @@ class HTMLCleaner:
                 and tag.get("style") == "line-height: 100%; margin-bottom: 0in"
             )
 
-        # First collect all question ranges
-        questions = []
-        current_question = None
-        elements = list(body.children)
-        
-        for i, el in enumerate(elements):
-            if not isinstance(el, Tag):
-                continue
-                
-            text = el.get_text(strip=True)
-            
-            # Detect question header line (contains [TYPE] marker)
-            type_match = re.search(r"\[(\w+)\]", text)
-            if type_match and el.name == "p":
-                if current_question:
-                    questions.append(current_question)
-                
-                # Extract question code (everything before [TYPE])
-                question_code = text.split('[')[0].strip()
-                question_type = type_match.group(1)
-                
-                current_question = {
-                    'start': i,
-                    'code': question_code,
-                    'type': question_type,
-                    'label_elements': [el],
-                    'content_elements': []
-                }
-            elif not type_match and el.name == "p" and not current_question:
-                # Default question type (CHOICE) when no [] is present
-                question_code = text.strip()
-                question_type = "CHOICE"
-                
-                current_question = {
-                    'start': i,
-                    'code': question_code,
-                    'type': question_type,
-                    'label_elements': [el],
-                    'content_elements': []
-                }
-            elif current_question:
-                # Still collecting label until ===
-                if not current_question.get('label_complete'):
-                    if text == "===":
-                        current_question['label_elements'].append(el)
-                        current_question['label_complete'] = True
-                    else:
-                        current_question['label_elements'].append(el)
-                # Collecting content until end marker
-                elif not current_question.get('content_complete'):
-                    if is_end_line(el):
-                        current_question['content_complete'] = True
-                    else:
-                        current_question['content_elements'].append(el)
-        
-        if current_question:
-            questions.append(current_question)
+        def parse_questions(elements):
+            """Parse all question blocks and return list of structured dicts."""
+            questions = []
+            current_question = None
 
-        # Clear body and rebuild with wrapped questions
-        body.clear()
-        
-        for question in questions:
+            for el in elements:
+                if not isinstance(el, Tag):
+                    continue
+
+                text = el.get_text(strip=True)
+                type_match = re.search(r"\[(\w+)\]", text)
+
+                if type_match and el.name == "p":
+                    if current_question:
+                        questions.append(current_question)
+
+                    question_code = text.split('[')[0].strip()
+                    question_type = type_match.group(1)
+
+                    current_question = new_question_block(el, question_code, question_type)
+
+                elif not type_match and el.name == "p" and not current_question:
+                    # Assume it's the start of a CHOICE-type question
+                    question_code = text.strip()
+                    current_question = new_question_block(el, question_code, "CHOICE")
+
+                elif current_question:
+                    if not current_question.get("label_complete"):
+                        if text == "===":
+                            current_question["label_elements"].append(el)
+                            current_question["label_complete"] = True
+                        else:
+                            current_question["label_elements"].append(el)
+                    elif not current_question.get("content_complete"):
+                        if is_end_line(el):
+                            current_question["content_complete"] = True
+                        else:
+                            current_question["content_elements"].append(el)
+
+            if current_question:
+                questions.append(current_question)
+
+            return questions
+
+        def new_question_block(el, code, qtype):
+            """Create a new initialized question block."""
+            return {
+                "code": code,
+                "type": qtype,
+                "label_elements": [el],
+                "content_elements": [],
+            }
+
+        def build_question_html(question):
+            """Wrap label and content elements into a structured div."""
             print(f"→ Wrapping question block with code={question['code']}, type={question['type']}")
-            
             wrapper = self.soup.new_tag("div", attrs={
-                "class": question['code'], 
-                "id": question['type']
+                "class": question["code"],
+                "id": question["type"]
             })
-            
-            # Add label div
+
             label_div = self.soup.new_tag("div", attrs={"class": "label"})
-            for el in question['label_elements']:
+            for el in question["label_elements"]:
                 label_div.append(el)
             wrapper.append(label_div)
-            
-            # Add content div if there's content
-            if question['content_elements']:
+
+            if question["content_elements"]:
                 content_div = self.soup.new_tag("div", attrs={"class": "content"})
-                for el in question['content_elements']:
+                for el in question["content_elements"]:
                     content_div.append(el)
                 wrapper.append(content_div)
-            
-            body.append(wrapper)
-        
-        # Handle any remaining elements
-        remaining = [el for el in elements if el not in 
-                    [el for q in questions for el in q['label_elements'] + q['content_elements']]]
-        
+
+            return wrapper
+
+        def get_remaining_elements(elements, questions):
+            all_wrapped = [el for q in questions for el in q["label_elements"] + q["content_elements"]]
+            return [el for el in elements if el not in all_wrapped]
+
+        # --- Begin main logic ---
+        questions = parse_questions(elements)
+        body.clear()
+
+        for q in questions:
+            body.append(build_question_html(q))
+
+        remaining = get_remaining_elements(elements, questions)
         if remaining:
             misc_wrapper = self.soup.new_tag("div", attrs={"class": "misc"})
             for el in remaining:
                 if isinstance(el, Tag):
                     misc_wrapper.append(el)
             body.append(misc_wrapper)
+
 
 
 
