@@ -2,65 +2,82 @@
 
 This document outlines the conventions used by the HTML post-processing script (`clean_html.py`) to structure and label content for downstream JSON conversion. These conventions ensure consistent and LLM-readable HTML formatting.
 
----
+## 1. Sections
 
-## 1. **Sections**
+* Section headers such as `Section1000 - Study Intro Text` are wrapped in a `<div class="section" id="section-1000">` block.
+* The section ID is auto-generated from the numeric code.
+* Detection is based on the regex: `Section\s+(\d{3,4})\s*[-–—]?\s*(.*)`
 
-- Section headers such as `Section 1000 - Study Intro Text` are wrapped in a `<div class="section" id="section-1000">` block.
-- The section ID is auto-generated from the numeric code.
-- Detection is based on regex: `Section\s+(\d{3,4})\s*[-–—]?\s*(.*)`
+## 2. Questions
 
----
+* Each question is wrapped in a top-level div of the form:
+```html
+<div class="Q320_Intro" id="SCREENER">
+  <div class="label">...</div>
+  <div class="content">...</div>
+</div>
+```
+* Detection is driven by HTML line markers, not by content patterns:
+  A question begins immediately after a line of the form:
+```html
+<p lang="en-US" class="western" style="line-height:100%; margin-bottom:0in">
+```
+* The first non-empty paragraph following this line is the question header.
+* If it contains a code and a type in brackets (e.g. `Q320_Intro [SCREENER]`), the class and ID are extracted accordingly.
+* If there are no brackets, the type defaults to CHOICE.
+* The question label block continues until a line containing only `===`.
+* The question content block continues until the next HTML line of the same form (`<p lang=...>`) marking the end.
 
-## 2. **Questions**
+## 3. Tables
 
-- Questions are wrapped in `<div class="question" data-code="..." data-type="...">`.
-- Detection is based on lines like `AGE_ORI [AGE_STANDARD]:` using the pattern `(?P<code>\w+)\s*\[(?P<type>\w+)]\s*:`
-- All subsequent content is considered part of the question block until a `===` line is encountered.
+* Tables are labeled based on the paragraph that directly precedes them, matching labels such as:
+  * VARIABLES TABLE
+  * COLUMNS TABLE
+* If no match is found, the table is tagged:
+```html
+[TABLE LABEL: OTHER TABLE]
+```
 
----
+## 4. Table Cell Compression
 
-## 3. **Tables**
+* Redundant wrapping like `<td><p><b>Text</b></p></td>` is flattened to:
+```html
+<td><b>Text</b></td>
+```
+* Multiple `<p>` elements inside a `<td>` are merged into a single string.
 
-- Tables are labeled based on the paragraph that precedes them, detecting keywords like:
-  - `VARIABLES TABLE`
-  - `COLUMNS TABLE`
-- If no match is found, it is labeled as `[TABLE LABEL: OTHER TABLE]`.
+## 5. Prefix Stripping in Table Variables
 
----
+* For any first-column entry like `Q305_1`, the prefix is removed:
+```html
+Q305_1 → 1
+```
 
-## 4. **Table Cell Compression**
+## 6. Style and Attribute Cleanup
 
-- Redundant nesting of `<p><b>...</b></p>` inside `<td>` is flattened.
-- Consecutive `<p>` elements within a single `<td>` are merged into a single text block.
+* Preserved styles: only `style="color"` remains.
+* Removed attributes:
+  * `width`
+  * `align`
+  * `cellpadding`
+  * `cellspacing`
+  * `valign`
+  * `height`
+  * etc.
+* Removed common noise:
+  * `lang="en-US"`
+  * `class="western"`
 
----
+## 7. Extra Content / Programmer Notes
 
-## 5. **Prefix Stripping in Table Variables**
+* Programmer-facing notes (e.g., `Programmer: Range0–100`) are preserved.
+* These are included under the corresponding question block as part of the `.content` section or treated separately as EXTRA in JSON.
 
-- In tables, variables like `Q305_1` are stripped to `1` if they match the question code pattern.
+## 8. Miscellaneous Content
 
----
-
-## 6. **Style and Attribute Cleanup**
-
-- Retains only `style="color"` for color-dependent parsing.
-- Removes legacy attributes like `width`, `align`, `cellpadding`, etc.
-- Removes `lang="en-US"` and `class="western"` from tags to reduce noise.
-
----
-
-## 7. **Extra Content / Programmer Notes**
-
-- Programmer-facing notes (e.g., "Programmer: Range 0–100") are not discarded.
-- These remain within the corresponding question block for JSON transformation under `EXTRA`.
-
----
-
-## 8. **Miscellaneous Content**
-
-- Any content not matched as part of a question or section is wrapped in `<div class="misc">`.
-
----
-
-These conventions are enforced in `HTMLCleaner.clean()` and support robust downstream parsing for question/answer extraction and schema validation.
+* All non-question, non-section, non-table content is grouped under:
+```html
+<div class="misc">...</div>
+```
+These conventions are applied in `HTMLCleaner.clean()` and enforced primarily in `wrap_questions()`, `wrap_sections()`, and related helpers.
+They ensure consistent HTML structure for downstream question-answer extraction and JSON schema generation.

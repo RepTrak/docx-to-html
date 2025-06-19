@@ -1,59 +1,64 @@
 # docx-to-html
-Converting `.docx` files to structured `.html` for JSON transformation. Running Python 3.12.0.
 
-This project aims to preserve key hierarchy information from text such as:
+Converting `.docx` files to structured `.html` using LibreOffice inside a Docker container. Running Python 3.12.0.
 
-- **Text hierarchy** (headings, bold/italic text)  
-- **Tables with labeled structure**  
-- **Question and response formatting**  
-- **Style-based information** (such as text color used to infer question code vs. type)
+This project is designed to preserve key document structures needed for downstream JSON transformation, including:
 
-The following file is currently being used for testing purposes: `svb_qnr_-_main_-_english__february_2024_for_ingestion.docx`
+- **Text hierarchy** (e.g. headings, bold/italic formatting)
+- **Structured tables**
+- **Question-label conventions**
+- **Style-based cues** (e.g. color indicating codes vs. types)
 
-Tutorial for downloading Docker on CentOs Stream 10: `docx-to-html/docker-setup.md`
+The working test file is:  
+`svb_qnr_-_main_-_english__february_2024_for_ingestion.docx`
 
-A list of the various conventions used in the SVB .docx file for custom .html postprocessing: `docx-to-html/conventions.md`
-
----
-
-## Step 1: Conversion
-
-LibreOffice is used to convert `.docx` files to `.html`. This process is automated through a Docker-based Python wrapper that runs LibreOffice inside a container.
-
-- All `.docx` files located in `/home/jliu/docx-to-html/data/docx_input` will be converted.
-- The resulting `.html` files are saved to `/home/jliu/docx-to-html/data/html_output`.
-
-> Requires: Docker installed and user added to the `docker` group.
+See [docker-setup.md](docx-to-html/docker-setup.md) for full Docker installation instructions on CentOS Stream 10.  
+See [conventions.md](docx-to-html/conventions.md) for encoding rules used in `.docx` formatting.
 
 ---
 
-**Step 2: Post-processing**
+## Step 1: Convert `.docx` to `.html`
 
-The `clean_html.py` script post-processes the obtained `.html` file by removing extraneous formatting and using standardized conventions to structure the content:
+This pipeline uses **LibreOffice running in Docker** to batch-convert all `.docx` files into `.html`.
 
-- **Strip extraneous inline styles** (retaining only `color`)
-- **Remove deprecated HTML attributes** and empty tags
-- **Wrap each question** in a `<div class="question">` with `data-code` and `data-type` attributes
-- **Tag unlabeled or out-of-place content** as `MISC`
-- **Extract and label tables** as `VARIABLES TABLE`, `COLUMNS TABLE`, or `OTHER TABLE`
-- **Normalize question variable names** in tables (e.g., `Q320_1` → `1`)
-- **Preserve Programmer Notes** and associate them with the correct question as `EXTRA`
-
-The result is a `.html` file that can be interpreted by an LLM to produce a valid JSON schema.
-
----
-
-**Pandoc (Optional)**
-
-Though not currently used in the pipeline, pandoc is a backup tool to convert .docx to .html. 
-
-To manually install Pandoc 3.1.13:
+- Input: `/home/jliu/docx-to-html/data/docx_input/*.docx`
+- Output: `/home/jliu/docx-to-html/data/html_output/*.html`
 
 ```bash
-cd /usr/local/bin
-curl -LO https://github.com/jgm/pandoc/releases/download/3.1.13/pandoc-3.1.13-linux-amd64.tar.gz
-tar -xzf pandoc-3.1.13-linux-amd64.tar.gz
-cp -r pandoc-3.1.13/bin/* /usr/local/bin/
-rm -rf pandoc-3.1.13*
+# Run the conversion pipeline
+./scripts/full_pipeline.py
 ```
-verify with pandoc --version
+Requirements: 
+- Docker installed on your system
+- Your user added to the docker group:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+## Step 2: Post-process HTML
+
+The output HTML is cleaned and structured using `scripts/clean_html.py`:
+```bash
+python3 scripts/clean_html.py
+```
+
+This step:
+- Removes extraneous inline styles and deprecated attributes
+- Wraps each question into:
+```html
+<div class="Q320_Intro" id="SCREENER">
+  <div class="label">...</div>
+  <div class="content">...</div>
+</div>
+```
+
+- Tags non-question content as:
+```html
+<div class="misc">...</div>
+```
+
+- Labels tables as VARIABLES TABLE, COLUMNS TABLE, or OTHER TABLE
+- Normalizes table codes (e.g. Q320_1 → 1)
+- Preserves programmer notes (PN:) under the corresponding question as EXTRA
