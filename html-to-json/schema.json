@@ -1,0 +1,86 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "sections": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["code", "label", "position", "elements"],
+          "properties": {
+            "code": { "type": "string" },
+            "label": { "type": "string" },
+            "notes": { "type": ["string", "null"] },
+            "position": { "type": "integer" },
+            "elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["code", "label", "type", "position", "options", "variables", "columns"],
+                "properties": {
+                  "code": { "type": "string" },
+                  "label": { "type": "string" },
+                  "notes": { "type": ["string", "null"] },
+                  "type": { "type": "string", "enum": ["CHOICE"] },
+                  "position": { "type": "integer" },
+                  "options": {
+                    "type": "object",
+                    "required": ["element_type", "randomize_variables", "multiple_choice"],
+                    "properties": {
+                      "element_type": { "type": "string", "enum": ["CHOICE"] },
+                      "randomize_variables": { "type": "boolean" },
+                      "multiple_choice": { "type": "boolean" }
+                    },
+                    "additionalProperties": false
+                  },
+                  "variables": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["code", "label", "position", "options"],
+                      "properties": {
+                        "code": { "type": ["integer", "string"] },
+                        "label": { "type": "string" },
+                        "notes": { "type": ["string", "null"] },
+                        "position": { "type": "integer" },
+                        "options": {
+                          "type": "object",
+                          "required": ["keep_position_in_randomize", "element_type", "exclude_other_variables"],
+                          "properties": {
+                            "keep_position_in_randomize": { "type": "boolean" },
+                            "element_type": { "type": "string", "enum": ["CHOICE"] },
+                            "exclude_other_variables": { "type": "boolean" }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "columns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["code", "label", "position"],
+                      "properties": {
+                        "code": { "type": ["integer", "string"] },
+                        "label": { "type": "string" },
+                        "position": { "type": "integer" },
+                        "notes": { "type": ["string", "null"] }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["sections"],
+    "additionalProperties": false
+  }
+  
