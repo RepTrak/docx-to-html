@@ -10,7 +10,7 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-3-sonnet-20240229"  # or "claude-3-opus-20240229"
+MODEL = "claude-3-haiku-20240307"
 
 def call_anthropic(messages):
     system_prompt = messages[0]["content"]
@@ -44,26 +44,34 @@ def extract_json_from_markdown(text):
 def main():
     html_path = "/home/jliu/docx-to-html/data/html_output/svb_qnr_-_main_-_english__february_2024_for_ingestion_cleaned.html"
     schema_path = "schema.json"
-    metaprompt_path = "metaprompt.xml"
+    prompt_template_path = "prompt.txt"
 
     print("Building Anthropic prompt...")
-    messages = build_messages(html_path, schema_path, metaprompt_path)
+    messages = build_messages(html_path, schema_path, prompt_template_path)
     result = call_anthropic(messages)
 
+    clean_result = extract_json_from_markdown(result)
+
+    # Derive filename and output folder
+    html_filename = os.path.basename(html_path).replace("_cleaned.html", "")
+    output_dir = "/home/jliu/docx-to-html/data/json_final"
+    os.makedirs(output_dir, exist_ok=True)
+
     try:
-        clean_result = extract_json_from_markdown(result)
         data = json.loads(clean_result)
+        final_path = os.path.join(output_dir, f"{html_filename}_valid.json")
+        with open(final_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        print(f"Parsed JSON saved to: {final_path}")
+        print("Running validation...")
+        validate_output(schema_path=schema_path, output_path=final_path)
     except json.JSONDecodeError:
-        print("Claude returned invalid JSON:")
-        print(result)
-        sys.exit(1)
+        final_path = os.path.join(output_dir, f"{html_filename}_invalid.json")
+        with open(final_path, "w", encoding="utf-8") as f:
+            f.write(clean_result)
+        print("Claude returned invalid JSON.")
+        print(f"Raw output saved to: {final_path}")
 
-    with open("output.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-    print("Response saved to output.json")
-    print("Running validation...")
-    validate_output()
 
 if __name__ == "__main__":
     main()
