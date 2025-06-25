@@ -33,23 +33,28 @@ def extract_json_from_markdown(text):
     return text
 
 def main():
-    print("🚀 Building prompt and sending to Groq...")
-    messages = build_messages("cleaned.html", "schema.json", "metaprompt.xml")
+    html_path = "/home/jliu/docx-to-html/data/html_output/svb_qnr_-_main_-_english__february_2024_for_ingestion_cleaned.html"
+    schema_path = "schema.json"
+    metaprompt_path = "metaprompt.xml"
+
+    print(f"Building prompt from:\n- HTML: {html_path}\n- Schema: {schema_path}")
+    messages = build_messages(html_path, schema_path, metaprompt_path)
+
     result = call_groq(messages)
 
     try:
         clean_result = extract_json_from_markdown(result)
         data = json.loads(clean_result)
     except json.JSONDecodeError as e:
-        print("❌ LLM returned invalid JSON:")
+        print("LLM returned invalid JSON:")
         print(result)
         sys.exit(1)
 
     with open("output.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-    print("✅ Response saved to output.json")
-    print("🔎 Running validation...")
+    print("Response saved to output.json")
+    print("Running validation...")
     validate_output()
 
 if __name__ == "__main__":
