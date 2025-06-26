@@ -13,9 +13,9 @@ the jobs of each file in this folder:
 ## validate.py
 - validates output.json by comparing it against schema.json
 
-## send_to_groq.py
+## send_to_anthropic.py
 - calls build_messages() to generate the final prompt
-- sends the result to Groq's OpenAI API
+- sends the result to Anthropic using model = "claude-3-haiku-20240307"
 - parses and saves the output to output.py
 - runs validation using validate.py
 

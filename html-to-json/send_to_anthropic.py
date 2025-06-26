@@ -33,7 +33,9 @@ def call_anthropic(messages):
 
     response = requests.post(ANTHROPIC_API_URL, headers=headers, json=payload)
     response.raise_for_status()
-    return response.json()["content"][0]["text"]
+    data = response.json()
+
+    return data["content"][0]["text"], data.get("usage", {})
 
 def extract_json_from_markdown(text):
     """Extract JSON from a code block if wrapped in ```json ... ```"""
@@ -48,7 +50,7 @@ def main():
 
     print("Building Anthropic prompt...")
     messages = build_messages(html_path, schema_path, prompt_template_path)
-    result = call_anthropic(messages)
+    result, usage = call_anthropic(messages)
 
     clean_result = extract_json_from_markdown(result)
 
@@ -72,6 +74,9 @@ def main():
         print("Claude returned invalid JSON.")
         print(f"Raw output saved to: {final_path}")
 
+    print("\n Claude usage report:")
+    print(f" - Input tokens:  {usage.get('input_tokens', 'N/A')}")
+    print(f" - Output tokens: {usage.get('output_tokens', 'N/A')}")
 
 if __name__ == "__main__":
     main()

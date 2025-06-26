@@ -1,0 +1,20 @@
+You will be provided:
+1. A JSON Schema that the output must conform to.
+2. A full HTML document.
+3. A partial JSON output (incomplete) that was generated from the HTML above using this schema.
+
+This partial JSON was cut off after 4096 output tokens.
+
+Please estimate how many total tokens would be required to generate the full, complete JSON output for this HTML and schema.
+
+HTML:
+[[html]]
+
+JSON Schema:
+[[json-schema]]
+
+Partial JSON Output (cut off at 4096 tokens):
+[[partial-json]]
+
+
+**Return a single integer in plain text representing the estimated output tokens, along with one sentence to explain your results.**

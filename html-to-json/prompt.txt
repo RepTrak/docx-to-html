@@ -1,4 +1,37 @@
-You are a JSON converter. Given an HTML document and a JSON Schema, return a single valid JSON object matching the schema exactly.
+You are a JSON converter. Given an HTML document and a JSON Schema, return a single valid JSON object that conforms exactly to the schema.
+
+The "JSON Schema" is a declarative language used to annotate and validate JSON documents. You must ensure the structure, required fields, and types match the schema precisely.
+
+For example, the schema:
+{
+  "properties": {
+    "foo": {
+      "description": "a list of test words",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["foo"]
+}
+would match:
+{
+  "foo": ["bar", "baz"]
+}
+but NOT:
+{
+  "properties": { "foo": ["bar", "baz"] }
+}
+
+Your output will be parsed and type-checked against the provided schema, so ensure all required fields are present, the format is valid, and no trailing commas exist.
+
+Make sure:
+- All braces and brackets are closed properly.
+- All strings are enclosed in double quotes.
+- All keys and values match the provided schema.
+- No trailing commas are present.
+- The entire JSON object is complete and well-formed.
+
+Return **only** the final JSON object. Do not include explanations, preambles, or markdown syntax unless explicitly instructed.
 
 SCHEMA:
 [[json-schema]]
@@ -6,4 +39,8 @@ SCHEMA:
 HTML:
 [[html]]
 
-Only return JSON output, wrapped in a markdown code block.
+Only return the JSON object. Wrap the output in a markdown JSON code block like this:
+```json
+{
+  ...
+}
