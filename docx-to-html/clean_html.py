@@ -224,9 +224,6 @@ class HTMLCleaner:
                     misc_wrapper.append(el)
             body.append(misc_wrapper)
 
-
-
-
     def compress_table_cells(self):
         for table in self.soup.find_all("table"):
             for td in table.find_all("td"):
