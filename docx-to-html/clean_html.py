@@ -52,7 +52,6 @@ class HTMLCleaner:
                     continue
                 p.decompose()
 
-
     def wrap_sections(self):
         section_pattern = re.compile(r"Section\s+(\d{3,4})\s*[-–—]?\s*(.*)", re.IGNORECASE)
         body = self.soup.body
@@ -74,7 +73,6 @@ class HTMLCleaner:
                 section_id = f"section-{section_code.lower()}"
                 wrapper = self.soup.new_tag("div", attrs={"id": section_id, "class": "section"})
 
-                print(f"→ Wrapping section {section_code}: {section_label}")
                 el.insert_before(wrapper)
                 wrapper.append(el.extract())
 
@@ -132,7 +130,6 @@ class HTMLCleaner:
             )
 
         def parse_questions(elements):
-            """Parse all question blocks and return list of structured dicts."""
             questions = []
             current_question = None
 
@@ -153,7 +150,6 @@ class HTMLCleaner:
                     current_question = new_question_block(el, question_code, question_type)
 
                 elif not type_match and el.name == "p" and not current_question:
-                    # Assume it's the start of a CHOICE-type question
                     question_code = text.strip()
                     current_question = new_question_block(el, question_code, "CHOICE")
 
@@ -176,7 +172,6 @@ class HTMLCleaner:
             return questions
 
         def new_question_block(el, code, qtype):
-            """Create a new initialized question block."""
             return {
                 "code": code,
                 "type": qtype,
@@ -185,11 +180,10 @@ class HTMLCleaner:
             }
 
         def build_question_html(question):
-            """Wrap label and content elements into a structured div."""
-            print(f"→ Wrapping question block with code={question['code']}, type={question['type']}")
             wrapper = self.soup.new_tag("div", attrs={
-                "class": question["code"],
-                "id": question["type"]
+                "class": "question",
+                "data-code": question["code"],
+                "data-type": question["type"]
             })
 
             label_div = self.soup.new_tag("div", attrs={"class": "label"})
@@ -209,7 +203,6 @@ class HTMLCleaner:
             all_wrapped = [el for q in questions for el in q["label_elements"] + q["content_elements"]]
             return [el for el in elements if el not in all_wrapped]
 
-        # --- Begin main logic ---
         questions = parse_questions(elements)
         body.clear()
 
@@ -257,22 +250,19 @@ class HTMLCleaner:
         self.save_html()
 
 
+# Batch process for html_chunks_precleaned
+input_folder = "/home/jliu/docx-to-html/data/html_chunks_precleaned"
+output_folder = "/home/jliu/docx-to-html/data/html_chunks_cleaned"
+os.makedirs(output_folder, exist_ok=True)
 
-def batch_clean_html(folder):
-    for name in os.listdir(folder):
-        if name.endswith(".html") and not name.endswith("_cleaned.html"):
-            in_path = os.path.join(folder, name)
-            out_path = os.path.join(folder, name.replace(".html", "_cleaned.html"))
-            print(f"\n--- Starting: {name} ---")
-            try:
-                cleaner = HTMLCleaner(in_path, out_path)
-                cleaner.clean()
-                print(f"✔ Finished: {name}")
-            except Exception as e:
-                print(f"✖ Error in {name}: {str(e)}")
-        else:
-            print(f"(Skipping file: {name})")
-
-
-if __name__ == "__main__":
-    batch_clean_html("/home/jliu/docx-to-html/data/html_output")
+results = []
+for filename in os.listdir(input_folder):
+    if filename.endswith(".html") and not filename.endswith("_cleaned.html"):
+        in_path = os.path.join(input_folder, filename)
+        out_path = os.path.join(output_folder, filename.replace(".html", "_cleaned.html"))
+        try:
+            cleaner = HTMLCleaner(in_path, out_path)
+            cleaner.clean()
+            results.append((filename, "✔"))
+        except Exception as e:
+            results.append((filename, f"✖ {str(e)}"))
