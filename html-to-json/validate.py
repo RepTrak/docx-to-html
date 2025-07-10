@@ -2,7 +2,7 @@ import json
 import sys
 from jsonschema import validate, Draft7Validator, ValidationError
 
-def main(schema_path="schema.json", output_path="output.json"):
+def validate_json(schema_path="schema.json", output_path="output.json"):
     with open(schema_path, encoding="utf-8") as f:
         schema = json.load(f)
 
@@ -24,4 +24,15 @@ def main(schema_path="schema.json", output_path="output.json"):
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 3:
+        print("Usage: python validate.py schema.json output.json")
+        sys.exit(1)
+
+    schema_path = sys.argv[1]
+    output_path = sys.argv[2]
+
+    with open(output_path, encoding="utf-8") as f:
+        output = json.load(f)
+
+    validate_json(output, schema_path)
+    print("Validation successful.")

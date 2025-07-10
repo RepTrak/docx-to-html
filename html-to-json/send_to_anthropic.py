@@ -1,82 +1,74 @@
 import os
 import json
-import sys
-import requests
+from anthropic import Anthropic
 from json_prompt import build_messages
-from validate import main as validate_output
+from jsonschema import Draft7Validator
 
-from dotenv import load_dotenv
-load_dotenv()
+input_folder = "/home/jliu/docx-to-html/data/html_chunks_cleaned"
+output_folder = "/home/jliu/docx-to-html/data/json_chunks"
+schema_path = '/home/jliu/docx-to-html/html-to-json/schema.json'
+os.makedirs(output_folder, exist_ok=True)
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-3-haiku-20240307"
+model = "claude-3-haiku-20240307"
+anthropic = Anthropic()
 
-def call_anthropic(messages):
-    system_prompt = messages[0]["content"]
-    user_prompt = messages[1]["content"]
+results = []
 
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    }
+def validate_with_schema(schema_path, instance):
+    with open(schema_path, encoding="utf-8") as f:
+        schema = json.load(f)
+    validator = Draft7Validator(schema)
+    errors = sorted(validator.iter_errors(instance), key=lambda e: e.path)
+    return errors
 
-    payload = {
-        "model": MODEL,
-        "max_tokens": 4096,
-        "system": system_prompt,
-        "messages": [
-            { "role": "user", "content": user_prompt }
-        ]
-    }
+for filename in sorted(os.listdir(input_folder)):
+    if not filename.endswith(".html"):
+        continue
 
-    response = requests.post(ANTHROPIC_API_URL, headers=headers, json=payload)
-    response.raise_for_status()
-    data = response.json()
+    input_path = os.path.join(input_folder, filename)
+    output_path = os.path.join(output_folder, filename.replace(".html", ".json"))
 
-    return data["content"][0]["text"], data.get("usage", {})
-
-def extract_json_from_markdown(text):
-    """Extract JSON from a code block if wrapped in ```json ... ```"""
-    if text.strip().startswith("```json"):
-        return text.strip().split("```json")[1].split("```")[0].strip()
-    return text
-
-def main():
-    html_path = "/home/jliu/docx-to-html/data/html_output/svb_qnr_-_main_-_english__february_2024_for_ingestion_cleaned.html"
-    schema_path = "schema.json"
-    prompt_template_path = "prompt.txt"
-
-    print("Building Anthropic prompt...")
-    messages = build_messages(html_path, schema_path, prompt_template_path)
-    result, usage = call_anthropic(messages)
-
-    clean_result = extract_json_from_markdown(result)
-
-    # Derive filename and output folder
-    html_filename = os.path.basename(html_path).replace("_cleaned.html", "")
-    output_dir = "/home/jliu/docx-to-html/data/json_final"
-    os.makedirs(output_dir, exist_ok=True)
-
+    print(f"\n--- Processing: {filename} ---")
     try:
-        data = json.loads(clean_result)
-        final_path = os.path.join(output_dir, f"{html_filename}_valid.json")
-        with open(final_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        print(f"Parsed JSON saved to: {final_path}")
-        print("Running validation...")
-        validate_output(schema_path=schema_path, output_path=final_path)
-    except json.JSONDecodeError:
-        final_path = os.path.join(output_dir, f"{html_filename}_invalid.json")
-        with open(final_path, "w", encoding="utf-8") as f:
-            f.write(clean_result)
-        print("Claude returned invalid JSON.")
-        print(f"Raw output saved to: {final_path}")
+        with open(input_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
 
-    print("\n Claude usage report:")
-    print(f" - Input tokens:  {usage.get('input_tokens', 'N/A')}")
-    print(f" - Output tokens: {usage.get('output_tokens', 'N/A')}")
+        messages = build_messages(html_content, schema_path)
 
-if __name__ == "__main__":
-    main()
+        response = anthropic.messages.create(
+            model=model,
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.0,
+        )
+
+        output_text = response.content[0].text.strip()
+        usage = response.usage
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(output_text)
+
+        try:
+            parsed = json.loads(output_text)
+            errors = validate_with_schema(schema_path, parsed)
+            if not errors:
+                print(f"✔ Validated ({usage.input_tokens} in, {usage.output_tokens} out)")
+                results.append((filename, "✔", usage.input_tokens, usage.output_tokens))
+            else:
+                print(f"⚠ Invalid JSON ({usage.input_tokens} in, {usage.output_tokens} out):")
+                for err in errors:
+                    print(f"  - {list(err.path)}: {err.message}")
+                results.append((filename, "⚠ Schema validation failed", usage.input_tokens, usage.output_tokens))
+        except Exception as ve:
+            print(f"⚠ Invalid JSON ({usage.input_tokens} in, {usage.output_tokens} out): {ve}")
+            results.append((filename, f"⚠ {ve}", usage.input_tokens, usage.output_tokens))
+
+    except Exception as e:
+        print(f"✖ Error: Failed to process {filename}: {e}")
+        results.append((filename, f"✖ {e}", None, None))
+
+# Summary
+print("\n=== JSON Extraction Summary ===")
+for fname, status, in_tok, out_tok in results:
+    token_info = f"({in_tok} in, {out_tok} out)" if in_tok is not None else ""
+    print(f"{status:<5} {fname:<50} {token_info}")
