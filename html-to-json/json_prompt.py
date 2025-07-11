@@ -19,15 +19,15 @@ def build_messages(html_path: str, schema_path: str, prompt_template_path: str =
 
     prompt_template = load_prompt_template(prompt_template_path)
     user_prompt = render_prompt(html_content, schema, prompt_template)
-
     messages = [
-        {
-            "role": "system",
-            "content": "You are a JSON converter. Only return valid JSON that matches the provided schema."
-        },
         {
             "role": "user",
             "content": user_prompt
         }
     ]
-    return messages
+    
+    # Return both messages and system prompt separately
+    return {
+        "messages": messages,
+        "system": "You are a JSON converter. Only return valid JSON that matches the provided schema."
+    }

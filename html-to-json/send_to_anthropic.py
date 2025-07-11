@@ -3,14 +3,16 @@ import json
 from anthropic import Anthropic
 from json_prompt import build_messages
 from jsonschema import Draft7Validator
+from dotenv import load_dotenv
 
+load_dotenv('/home/jliu/docx-to-html/.env')
 input_folder = "/home/jliu/docx-to-html/data/html_chunks_cleaned"
 output_folder = "/home/jliu/docx-to-html/data/json_chunks"
 schema_path = '/home/jliu/docx-to-html/html-to-json/schema.json'
 os.makedirs(output_folder, exist_ok=True)
 
 model = "claude-3-haiku-20240307"
-anthropic = Anthropic()
+anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 results = []
 
@@ -30,14 +32,17 @@ for filename in sorted(os.listdir(input_folder)):
 
     print(f"\n--- Processing: {filename} ---")
     try:
-        with open(input_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
-
-        messages = build_messages(html_content, schema_path)
+        # Get both messages and system prompt
+        prompt_data = build_messages(
+            html_path=input_path, 
+            schema_path=schema_path,
+            prompt_template_path="prompt.txt"
+        )
 
         response = anthropic.messages.create(
             model=model,
-            messages=messages,
+            messages=prompt_data["messages"],  # Messages array and system prompt are passed separately
+            system=prompt_data["system"],
             max_tokens=4096,
             temperature=0.0,
         )

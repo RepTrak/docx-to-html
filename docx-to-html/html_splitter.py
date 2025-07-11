@@ -94,7 +94,7 @@ def split_html_by_questions_fixed(input_path, output_dir):
         for el in elements:
             chunk_soup.body.append(el)
         safe_code = code.replace('/', '_').replace('\\', '_').strip() or 'chunk'
-        filename = f"{i:03d}_{safe_code}.html"
+        filename = f"{i:03d}.html"
         filepath = os.path.join(output_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(str(chunk_soup))

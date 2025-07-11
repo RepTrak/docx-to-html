@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 import os
 import difflib
+import re
 
 def extract_body_html(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -8,16 +9,44 @@ def extract_body_html(path):
     body = soup.body
     return body.encode_contents().decode("utf-8").strip() if body else ""
 
-def debug_html_diff(original, reconstructed, context=200):
-    print("Generating detailed diff...\n")
-
+def analyze_differences(original, reconstructed):
+    """Analyze differences between original and reconstructed content"""
     matcher = difflib.SequenceMatcher(None, original, reconstructed)
+    whitespace_chars = 0
+    non_whitespace_chars = 0
+    total_diff_chars = 0
+    
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag != "equal":
-            print(f"Change type: {tag}")
-            print(f"Original [{i1}:{i2}] ({i2 - i1} chars):\n{original[i1:i2][:context]!r}\n")
-            print(f"Reconstructed [{j1}:{j2}] ({j2 - j1} chars):\n{reconstructed[j1:j2][:context]!r}\n")
-            break  # Remove this `break` if you want to show *all* differences
+            diff_text = original[i1:i2]
+            ws_chars = sum(1 for c in diff_text if c.isspace())
+            non_ws_chars = len(diff_text) - ws_chars
+            
+            whitespace_chars += ws_chars
+            non_whitespace_chars += non_ws_chars
+            total_diff_chars += len(diff_text)
+    
+    return {
+        "total_diff": total_diff_chars,
+        "whitespace_chars": whitespace_chars,
+        "non_whitespace_chars": non_whitespace_chars,
+        "whitespace_percent": (whitespace_chars / total_diff_chars * 100) if total_diff_chars else 0
+    }
+
+def debug_html_diff(original, reconstructed, context=200):
+    print("\nGenerating detailed diff...")
+    matcher = difflib.SequenceMatcher(None, original, reconstructed)
+    
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            print(f"\nChange type: {tag}")
+            print(f"Original [{i1}:{i2}] ({i2-i1} chars):")
+            print(repr(original[i1:i2][:context]))
+            
+            if tag == "replace":
+                print(f"\nReconstructed [{j1}:{j2}] ({j2-j1} chars):")
+                print(repr(reconstructed[j1:j2][:context]))
+            break
 
 def compute_chunk_offsets(chunks_dir):
     print("\nChunk file offsets:")
@@ -42,37 +71,30 @@ def validate_chunks(original_path, chunk_dir):
     ])
 
     reconstructed_body = ""
-    chunk_lengths = []
-
+    
     for file in chunk_files:
         chunk_html = extract_body_html(file)
         reconstructed_body += chunk_html
-        chunk_lengths.append((file, len(chunk_html)))
 
     reconstructed_len = len(reconstructed_body)
     print(f"Reconstructed body length: {reconstructed_len} characters")
-
-    if reconstructed_body.strip() == original_body:
-        print("Chunks match the original HTML exactly.")
+    
+    diff_stats = analyze_differences(original_body, reconstructed_body)
+    
+    if reconstructed_body == original_body:
+        print("\n✔ Perfect match - all chunks combine to exactly reconstruct the original")
     else:
-        print("Mismatch detected between original HTML and concatenated chunks.")
-        print(f"Difference in length: {original_len - reconstructed_len} characters")
-        print("Chunk breakdown:")
-        debug_html_diff(original_body, reconstructed_body)
-        compute_chunk_offsets('/home/jliu/docx-to-html/data/html_chunks_precleaned')
-        # for fname, length in chunk_lengths:
-        #     print(f"  - {os.path.basename(fname)}: {length} chars")
-
-        # diff = difflib.unified_diff(
-        #     original_body.splitlines(),
-        #     reconstructed_body.splitlines(),
-        #     fromfile='original',
-        #     tofile='reconstructed',
-        #     lineterm=''
-        # )
-        # print("\nDiff (first 100 lines):")
-        # for line in list(diff)[:100]:
-        #     print(line)
+        print(f"\nMismatch detected ({diff_stats['total_diff']} characters differ)")
+        print(f"  - Whitespace differences: {diff_stats['whitespace_chars']} chars ({diff_stats['whitespace_percent']:.1f}%)")
+        print(f"  - Non-whitespace differences: {diff_stats['non_whitespace_chars']} chars")
+        
+        if diff_stats['non_whitespace_chars'] > 0:
+            print("\n⚠ WARNING: Non-whitespace differences detected (potential content loss)")
+            debug_html_diff(original_body, reconstructed_body)
+        else:
+            print("\nNote: Differences are only whitespace (likely formatting changes)")
+        
+        compute_chunk_offsets(chunk_dir)
 
 if __name__ == "__main__":
     validate_chunks(
