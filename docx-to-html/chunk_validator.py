@@ -34,19 +34,29 @@ def analyze_differences(original, reconstructed):
     }
 
 def debug_html_diff(original, reconstructed, context=200):
-    print("\nGenerating detailed diff...")
+    print("\nGenerating complete diff analysis...")
     matcher = difflib.SequenceMatcher(None, original, reconstructed)
     
+    missing_sections = []
+    current_missing = ""
+    
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag != "equal":
-            print(f"\nChange type: {tag}")
-            print(f"Original [{i1}:{i2}] ({i2-i1} chars):")
-            print(repr(original[i1:i2][:context]))
+        if tag == "delete":
+            missing_text = original[i1:i2]
+            current_missing += missing_text
             
-            if tag == "replace":
-                print(f"\nReconstructed [{j1}:{j2}] ({j2-j1} chars):")
-                print(repr(reconstructed[j1:j2][:context]))
-            break
+            # If this is a substantial non-whitespace section
+            if not missing_text.strip() and current_missing.strip():
+                missing_sections.append(current_missing)
+                current_missing = ""
+    
+    if current_missing.strip():
+        missing_sections.append(current_missing)
+    
+    print(f"\nFound {len(missing_sections)} substantial missing sections:")
+    for i, section in enumerate(missing_sections[:5]):  # Show first 5 for brevity
+        print(f"\nMissing Section {i+1} ({len(section)} chars):")
+        print(repr(section[:500]))  # Show first 500 chars
 
 def compute_chunk_offsets(chunks_dir):
     print("\nChunk file offsets:")
