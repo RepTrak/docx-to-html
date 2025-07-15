@@ -36,7 +36,8 @@ for filename in sorted(os.listdir(input_folder)):
         prompt_data = build_messages(
             html_path=input_path, 
             schema_path=schema_path,
-            prompt_template_path="prompt.txt"
+            prompt_template_path="/home/jliu/docx-to-html/html-to-json/prompt.txt"
+
         )
 
         response = anthropic.messages.create(
