@@ -1,0 +1,23 @@
+{
+  "name": "docx-to-html",
+  "version": "1.0.0",
+  "description": "Converting `.docx` files to structured `.html` using LibreOffice inside a Docker container. Running Python 3.12.0.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RepTrak/docx-to-html.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/RepTrak/docx-to-html/issues"
+  },
+  "homepage": "https://github.com/RepTrak/docx-to-html#readme",
+  "dependencies": {
+    "turndown": "^7.2.0"
+  }
+}

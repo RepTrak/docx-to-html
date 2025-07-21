@@ -47,7 +47,6 @@ def split_html_by_questions(input_path, output_dir):
                 chunks.append((current_code, list(current_chunk)))
             current_chunk = [el]
             current_code = text.split('[')[0].strip() or "chunk"
-            label_complete = False
         elif not type_match and isinstance(el, Tag) and el.name == "p" and not seen_question:
             preface_elements.append(el)
         elif not type_match and isinstance(el, Tag) and el.name == "p" and not current_chunk:
@@ -57,16 +56,12 @@ def split_html_by_questions(input_path, output_dir):
                 preface_elements.clear()
             current_code = text.strip() or "chunk"
             current_chunk = [el]
-            label_complete = False
         elif current_chunk:
             current_chunk.append(el)
-            if not label_complete and text == "===":
-                label_complete = True
-            elif label_complete and isinstance(el, Tag) and is_end_line(el):
+            if text.strip() == "===":
                 chunks.append((current_code, list(current_chunk)))
                 current_chunk = []
                 current_code = None
-                label_complete = False
         elif not seen_question:
             preface_elements.append(el)
 

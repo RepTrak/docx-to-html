@@ -12,8 +12,11 @@ headers = {
 }
 
 payload = {
-    "model": "claude-3-haiku-20240307", # smallest and fastest model (standard tier)
-    "max_tokens": 10,
+    "model": "claude-3-5-haiku-20241022", # 8k tokens
+    # "claude-3-haiku-20240307" # 4k tokens
+    # "claude-sonnet-4-20250514" # 16k tokens
+    
+    "max_tokens": 64,
     "system": "test",
     "messages": [{"role": "user", "content": "hi"}]
 }

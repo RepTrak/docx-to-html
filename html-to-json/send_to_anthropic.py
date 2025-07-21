@@ -11,7 +11,7 @@ output_folder = "/home/jliu/docx-to-html/data/json_chunks"
 schema_path = '/home/jliu/docx-to-html/html-to-json/schema.json'
 os.makedirs(output_folder, exist_ok=True)
 
-model = "claude-3-haiku-20240307"
+model = "claude-3-5-haiku-20241022"
 anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 results = []
@@ -44,7 +44,7 @@ for filename in sorted(os.listdir(input_folder)):
             model=model,
             messages=prompt_data["messages"],  # Messages array and system prompt are passed separately
             system=prompt_data["system"],
-            max_tokens=4096,
+            max_tokens=8192, # use claude sonnet 3.5 for this token limit
             temperature=0.0,
         )
 
