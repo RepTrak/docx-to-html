@@ -1,16 +1,22 @@
 import os
 import json
 from anthropic import Anthropic
-from html_prompt_builder import build_messages
 from jsonschema import Draft7Validator
 from dotenv import load_dotenv
+from md_prompt_builder import build_messages  # assumes build_messages(md_path, schema_path, prompt_template_path)
 
+# Load API key from .env file
 load_dotenv('/home/jliu/docx-to-html/.env')
-input_folder = "/home/jliu/docx-to-html/data/html_chunks_cleaned"
-output_folder = "/home/jliu/docx-to-html/data/json_chunks_from_html"
-schema_path = '/home/jliu/docx-to-html/html-to-json/schema.json'
+
+# Paths
+input_folder = "/home/jliu/docx-to-html/data/markdown_chunks"
+output_folder = "/home/jliu/docx-to-html/data/json_chunks_from_markdown"
+schema_path = "/home/jliu/docx-to-html/html-to-json/schema.json"  # reuse HTML schema
+prompt_template_path = "/home/jliu/docx-to-html/markdown_to_json/md_prompt.txt"
+
 os.makedirs(output_folder, exist_ok=True)
 
+# Initialize Claude
 model = "claude-3-5-haiku-20241022"
 anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -24,27 +30,25 @@ def validate_with_schema(schema_path, instance):
     return errors
 
 for filename in sorted(os.listdir(input_folder)):
-    if not filename.endswith(".html"):
+    if not filename.endswith(".md"):
         continue
 
     input_path = os.path.join(input_folder, filename)
-    output_path = os.path.join(output_folder, filename.replace(".html", ".json"))
+    output_path = os.path.join(output_folder, filename.replace(".md", ".json"))
 
     print(f"\n--- Processing: {filename} ---")
     try:
-        # Get both messages and system prompt
         prompt_data = build_messages(
-            html_path=input_path, 
+            md_path=input_path,
             schema_path=schema_path,
-            prompt_template_path="/home/jliu/docx-to-html/html-to-json/html_prompt.txt"
-
+            prompt_template_path=prompt_template_path
         )
 
         response = anthropic.messages.create(
             model=model,
-            messages=prompt_data["messages"],  # Messages array and system prompt are passed separately
+            messages=prompt_data["messages"],
             system=prompt_data["system"],
-            max_tokens=8192, # use claude sonnet 3.5 for this token limit
+            max_tokens=8192,
             temperature=0.0,
         )
 

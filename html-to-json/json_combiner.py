@@ -2,8 +2,8 @@ import os
 import json
 
 # Define paths
-input_dir = "/home/jliu/docx-to-html/data/json_chunks"
-output_path = "/home/jliu/docx-to-html/data/json_final/json_combined.json"
+input_dir = "/home/jliu/docx-to-html/data/json_chunks_from_html"
+output_path = "/home/jliu/docx-to-html/data/json_final/json_combined_from_html_7_25.json"
 
 all_sections = []
 

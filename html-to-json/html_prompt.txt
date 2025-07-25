@@ -31,6 +31,19 @@ Make sure:
 - No trailing commas are present.
 - The entire JSON object is complete and well-formed.
 
+**Each section and element must contain**:
+- code, label, notes, position, type, options, variables (or []), columns (or [])
+For each variable and column:
+- include code, label, position, options (or {})
+All elements must match their "type" in structure. 
+For example, CHOICE elements must include variables and columns, and options such as randomize_variables, multiple_choice, required.
+If logic rules, skips, autofills, or conditions are described (e.g. "terminate if", "select if Q..."), encode these under `condition_rule` or `autofill_rule` following the schema.
+If you encounter templated placeholders like {#Company1} or [loopvar: var_label], ensure those are preserved in the JSON as dynamic labels and codes, as shown in looped questions.
+Each variable and column should have an 'options' object. Even if default, include 'keep_position_in_randomize', 'exclude_other_variables', 'element_type', etc.
+
+Reminder: This is one of many chunks of a larger survey. Maintain internal consistency with previously defined section codes, question codes, and types. Assume there is a full structure across chunks.
+
+
 Return **only** the final JSON object. Do not include explanations, preambles, or markdown syntax unless explicitly instructed.
 
 SCHEMA:
