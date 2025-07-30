@@ -1,0 +1,102 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["code", "label", "type", "position", "options", "variables", "columns"],
+    "properties": {
+      "code": { "type": "string" },
+      "label": { "type": "string" },
+      "notes": { "type": ["string", "null"] },
+      "type": {
+        "type": "string",
+        "enum": [
+          "CHOICE", "LONG_TEXT", "SCREENER", "BREAK_PAGE",
+          "COUNTRY_DROPDOWN", "RATING", "GRID", "NUMBER", "DATE"
+        ]
+      },
+      "position": { "type": "integer" },
+      "revision": { "type": ["string", "null"] },
+      "tags": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "options": {
+        "type": "object",
+        "properties": {
+          "element_type": {
+            "type": "string",
+            "enum": [
+              "CHOICE", "LONG_TEXT", "SCREENER", "BREAK_PAGE",
+              "COUNTRY_DROPDOWN", "RATING", "GRID", "NUMBER", "DATE"
+            ]
+          },
+          "required": { "type": "boolean" },
+          "hidden": { "type": "boolean" },
+          "link_require": { "type": "boolean" },
+          "link_attribute_name": { "type": ["string", "null"] },
+          "question_label_by_country": { "type": ["string", "null"] },
+          "qualify_respondent": { "type": "boolean" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" },
+          "regex": { "type": ["string", "null"] },
+          "na_checkbox": { "type": "boolean" },
+          "na_label": { "type": ["string", "null"] },
+          "na_code": { "type": ["string", "integer", "null"] }
+        },
+        "required": ["element_type"],
+        "additionalProperties": true
+      },
+      "condition_rule": {
+        "type": "object",
+        "properties": {
+          "decipher": { "type": ["string", "null"] },
+          "standard": { "type": ["object", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "is_loop_target": { "type": "boolean" },
+      "help_text": { "type": ["string", "null"] },
+      "variables": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["code", "label", "position", "options"],
+          "properties": {
+            "code": { "type": ["string", "integer"] },
+            "label": { "type": "string" },
+            "notes": { "type": ["string", "null"] },
+            "position": { "type": "integer" },
+            "options": {
+              "type": "object",
+              "required": ["keep_position_in_randomize", "element_type", "exclude_other_variables"],
+              "properties": {
+                "keep_position_in_randomize": { "type": "boolean" },
+                "element_type": {
+                  "type": "string",
+                  "enum": ["CHOICE", "GRID", "RATING"]
+                },
+                "exclude_other_variables": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["code", "label", "position"],
+          "properties": {
+            "code": { "type": ["string", "integer"] },
+            "label": { "type": "string" },
+            "position": { "type": "integer" },
+            "notes": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "additionalProperties": false
+  }
+  
