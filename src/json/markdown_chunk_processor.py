@@ -116,26 +116,107 @@ Respond with structured ChunkAnalysis.
 """
 
 CONTENT_EXTRACTION_PROMPT = """
-# LOCAL CONTEXT
-Extract structured questionnaire content from the provided text.
+# FRAGMENT-AWARE CONTENT EXTRACTION
 
-**Context**: {context}
+You are processing a **chunk fragment** from a larger questionnaire document. This chunk may contain:
+- Partial sections that started in previous chunks
+- Partial elements that continue in next chunks  
+- Complete sections/elements fully contained in this chunk
+- Mixed content with multiple fragments
+
+## Context Information
+**Position**: {context}
 **Content Type**: {content_type}
-**Accumulated Content**: {accumulated_content}
+**Fragment Status**: This may be an incomplete fragment
 
-**Current Chunk**:
+## Previously Accumulated Content
+```
+{accumulated_content}
+```
+
+## Current Chunk Fragment
+```
 {chunk_content}
+```
 
-**Instructions**:
-1. If this is a SECTION: extract code, label, notes, position
-2. If this is an ELEMENT: extract code, label, type, variables, columns, etc.
-3. Merge with accumulated content if this is a continuation
-4. Generate appropriate codes and maintain structure
-5. Keep original formatting and text exactly as provided
+## CRITICAL FRAGMENT PROCESSING RULES
 
-**Expected Structure**: {expected_schema}
+### 1. Content Boundary Detection
+- **Section boundaries**: Look for `# Section` headers - these typically mark clear section starts
+- **Element boundaries**: Look for `**ElementCode**:` patterns - these mark element starts
+- **Incomplete starts**: If text doesn't start with clear markers, it's likely a continuation
+- **Incomplete ends**: If text ends mid-sentence or mid-table, it continues in next chunk
 
-Extract as much structured content as possible from the available text.
+### 2. Fragment Merge Strategy
+- **If accumulated content exists**: Merge current chunk with accumulated content for complete picture
+- **If text starts incomplete**: Treat as continuation of previous content
+- **If text ends incomplete**: Extract what's complete, note what's partial
+
+### 3. Content Extraction Priorities
+1. **Complete sections**: Fully contained sections with clear start/end
+2. **Complete elements**: Fully contained elements with all components
+3. **Accumulated complete content**: When merging makes content complete
+4. **Partial content**: Mark as incomplete but preserve for next iteration
+
+### 4. Fragment-Specific Instructions
+- **Don't assume completion**: Just because you see a table end doesn't mean the element is complete
+- **Preserve exact formatting**: Keep all original text, codes, and structure exactly as written
+- **Handle overlaps**: Chunk overlaps may repeat content - identify and avoid duplication
+- **Mark uncertainty**: If unsure about boundaries, indicate in notes or metadata
+
+### 5. Expected Schema Adaptation
+**Target Schema**: {expected_schema}
+
+**For Section Fragments**:
+- Extract code, label, notes from headers
+- Accumulate content across chunks
+- Mark completion status
+
+**For Element Fragments**:  
+- Extract code, label, type from element headers
+- Build variables/columns from tables across chunks
+- Handle programming notes and instructions
+- Preserve all metadata and formatting
+
+### 6. Fragment Processing Examples
+
+**Incomplete Section Start**:
+```
+study questionnaire demographics
+
+# Section 100 - Demographics
+```
+→ Extract section start, note previous text as context
+
+**Incomplete Element with Table**:
+```
+**Q101**: What is your age?
+
+| Value Code | Value Label |
+| 1 | 18-24 |
+```
+→ Extract element start, note table is potentially incomplete
+
+**Middle Fragment**:
+```
+| 3 | 35-44 |
+| 4 | 45-54 |
+
+* Single answer
+* Required question
+```
+→ Recognize as continuation, merge with accumulated content
+
+## OUTPUT REQUIREMENTS
+
+Extract structured content following {expected_schema}, ensuring:
+1. **Exact text preservation**: Keep all original formatting and text
+2. **Fragment awareness**: Note when content appears incomplete
+3. **Boundary respect**: Don't invent content beyond chunk boundaries  
+4. **Merge intelligence**: Properly combine with accumulated content
+5. **Completion marking**: Indicate confidence in extraction completeness
+
+Process this fragment with full awareness of its partial nature.
 """
 
 
@@ -280,6 +361,7 @@ class MarkdownChunkProcessor:
                 self.monitor.complete_chunk(i)
                 
             except Exception as e:
+                logging.exception(f"Error processing chunk {i}: {str(e)}")
                 error_msg = f"Error processing chunk {i}: {str(e)}"
                 errors.append(error_msg)
                 self.monitor.complete_chunk(i, error_msg)

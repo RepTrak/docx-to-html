@@ -44,13 +44,13 @@ logger = logging.getLogger(__name__)
 @click.option(
     '--chunk-size',
     type=int,
-    default=4000,
+    default=256,
     help='Size of each chunk in characters (default: 2000)'
 )
 @click.option(
     '--chunk-overlap',
     type=int,
-    default=200,
+    default=20,
     help='Overlap between chunks in characters (default: 200)'
 )
 @click.option(
@@ -141,7 +141,7 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
         else:
             progress_callback = file_callback
     
-    logging.info(f"Processing markdown file: {input_file}")
+    logging.info(f"Processing markdown file: {input_file} with chunk size {ctx.obj['chunk_size']} and overlap {ctx.obj['chunk_overlap']}")
     
     # Initialize LLM client with specified providers
     llm_client = LLMClient(

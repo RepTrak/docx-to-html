@@ -109,7 +109,7 @@ def create_dashboard_callback(update_interval: float = 2.0) -> Callable[[Partial
         # Current content previews
         if report.current_section_preview:
             section = report.current_section_preview
-            print(f"📝 Current Section: {section.get('code', 'N/A')} - {section.get('label', 'N/A')[:50]}")
+            print(f"📝 Current Section: {section.get('code', 'N/A')} - {section.get('label', 'N/A')[:50] if section.get('label', 'N/A') else 'N/A'}")
             
         if report.current_element_preview:
             element = report.current_element_preview
@@ -120,7 +120,7 @@ def create_dashboard_callback(update_interval: float = 2.0) -> Callable[[Partial
         if report.errors:
             print(f"❌ Errors: {len(report.errors)}")
             for error in report.errors[-3:]:  # Show last 3 errors
-                print(f"  • {error[:70]}...")
+                print(f"  • {error}...")
             print()
             
         if report.warnings:

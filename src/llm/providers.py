@@ -37,8 +37,8 @@ class AnthropicProvider(LLMProvider):
         params = {
             "model": model,
             "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            # "max_tokens": max_tokens,
+            # "temperature": temperature,
             **kwargs
         }
         

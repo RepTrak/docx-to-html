@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional, Union, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 
 class BaseConfig:
     """Base configuration for Pydantic models."""
@@ -91,3 +91,5 @@ class FullSectionResponseSchema(SectionResponseSchema):
 
 class FullSurveyResponseSchema(BaseModel):
     sections: List[FullSectionResponseSchema]
+
+SectionsListResponseSchema = RootModel[List[FullSectionResponseSchema]]
