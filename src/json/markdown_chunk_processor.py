@@ -3,28 +3,24 @@ Service for processing markdown files in chunks to build FullSurveyResponseSchem
 """
 
 import logging
-import os
-import json
-import re
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Iterator, Callable
-from datetime import datetime, timedelta
-import time
+from typing import Optional, Callable
+from datetime import datetime
 
 from ..llm import LLMClient
-from ..models.questionnaire import (
-    FullSurveyResponseSchema, FullSectionResponseSchema, 
-    FullSectionElementSchema, VariableResponseSchema, GridColumnSchema
-)
-from ..models.parsing_state import (
-    ChunkAnalysis, ChunkType, ParsingState, PartialSection, 
-    PartialElement, ProcessingResult, ContentBoundary
-)
+from ..models.questionnaire import FullSurveyResponseSchema
+from ..models.parsing_state import ParsingState, ProcessingResult
 from ..models.monitoring import ProcessingMonitor, PartialReport, ProcessingPhase
 
-LLM_PROVIDER="openai"  # Default provider
-LLM_MODEL="gpt-4o-mini-2024-07-18"  # Default model
+from .chunking.text_chunker import TextChunker
+from .analysis.chunk_analyzer import ChunkAnalyzer
+from .extraction.content_extractor import ContentExtractor
+from .state.state_manager import StateManager
+from .finalization.schema_finalizer import SchemaFinalizer
+from .io.file_handler import FileHandler
 
+LLM_PROVIDER = "openai"  # Default provider
+LLM_MODEL = "gpt-4o-mini-2024-07-18"  # Default model
 
 SYSTEM_PROMPT = """
 # Global context
@@ -142,6 +138,7 @@ Extract structured questionnaire content from the provided text.
 Extract as much structured content as possible from the available text.
 """
 
+
 class MarkdownChunkProcessor:
     """Service for processing markdown files in chunks to build survey schemas."""
     
@@ -169,15 +166,29 @@ class MarkdownChunkProcessor:
             auto_save_interval: Save partial results every N chunks
             auto_save_dir: Directory for auto-saving partial results
         """
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
         self.verbose = verbose
+        
+        # Initialize LLM client
         self.llm_client = llm_client or LLMClient(
             providers=["anthropic", "openai"],
             retry_attempts=retry_attempts,
             retry_delay=1.0,
             retry_backoff=2.0
         )
+        
+        # Initialize service components following SOLID principles
+        self.chunker = TextChunker(chunk_size, chunk_overlap)
+        self.analyzer = ChunkAnalyzer(
+            self.llm_client, SYSTEM_PROMPT, CHUNK_ANALYSIS_PROMPT, 
+            LLM_PROVIDER, LLM_MODEL, verbose
+        )
+        self.extractor = ContentExtractor(
+            self.llm_client, SYSTEM_PROMPT, CONTENT_EXTRACTION_PROMPT,
+            LLM_PROVIDER, LLM_MODEL, verbose
+        )
+        self.state_manager = StateManager(chunk_overlap, verbose)
+        self.finalizer = SchemaFinalizer(verbose)
+        self.file_handler = FileHandler(verbose)
         
         # Initialize monitoring
         self.monitor = ProcessingMonitor(
@@ -190,418 +201,6 @@ class MarkdownChunkProcessor:
         """Log message if verbose mode is enabled."""
         if self.verbose:
             print(message)
-    
-    def _chunk_markdown(self, content: str) -> List[str]:
-        """Split markdown content into overlapping chunks."""
-        if len(content) <= self.chunk_size:
-            return [content]
-        
-        chunks = []
-        start = 0
-        
-        while start < len(content):
-            end = start + self.chunk_size
-            
-            # If not the last chunk, try to break at a good boundary
-            if end < len(content):
-                # Look for section breaks (## headers) within overlap distance
-                section_break = content.rfind('\n# ', start, end)
-                if section_break > start:
-                    end = section_break
-                else:
-                    # Look for element breaks (**bold**) within overlap distance
-                    element_break = content.rfind('\n**', start, end)
-                    if element_break > start:
-                        end = element_break
-                    else:
-                        # Look for paragraph breaks
-                        para_break = content.rfind('\n\n', start, end)
-                        if para_break > start:
-                            end = para_break
-            
-            chunk = content[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-            
-            # Calculate next start position with overlap
-            if end >= len(content):
-                break
-            start = max(start + 1, end - self.chunk_overlap)
-        
-        return chunks
-    
-    def _analyze_chunk(
-        self, 
-        chunk: str, 
-        chunk_index: int, 
-        total_chunks: int,
-        parsing_state: ParsingState
-    ) -> ChunkAnalysis:
-        """Analyze a chunk to determine its type and content."""
-        
-        start_time = time.time()
-        
-        # Create analysis prompt
-        prompt = CHUNK_ANALYSIS_PROMPT.format(
-            parsing_state=parsing_state.parsing_phase,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            previous_chunk_type=parsing_state.last_chunk_type,
-            chunk_content=chunk
-        )
-        
-        messages = [{"role": "assistant", "content": SYSTEM_PROMPT},{"role": "user", "content": prompt}]
-        
-        try:
-            response = self.llm_client.completion(
-                messages=messages,
-                response_format=ChunkAnalysis,
-                provider=LLM_PROVIDER,
-                model=LLM_MODEL,
-                temperature=0.1,
-                max_tokens=8192
-            )
-            
-            processing_time = int((time.time() - start_time) * 1000)
-            
-            if 'parsed' in response and response['parsed']:
-                analysis = response['parsed']
-                analysis.chunk_index = chunk_index
-                logging.info(f"Chunk {chunk_index} analysis: {analysis}")
-                
-                # Update monitoring
-                self.monitor.complete_chunk_analysis(
-                    chunk_index, 
-                    analysis.chunk_type.value, 
-                    analysis.confidence,
-                    processing_time
-                )
-                
-                # Track token usage if available
-                if 'usage' in response:
-                    usage = response['usage']
-                    self.monitor.update_token_usage(
-                        usage.get('prompt_tokens', 0),
-                        usage.get('completion_tokens', 0)
-                    )
-                
-                return analysis
-            else:
-                # Fallback analysis
-                self.monitor.complete_chunk_analysis(
-                    chunk_index, 
-                    ChunkType.UNKNOWN.value, 
-                    0.0,
-                    processing_time
-                )
-                return ChunkAnalysis(
-                    chunk_index=chunk_index,
-                    chunk_type=ChunkType.UNKNOWN,
-                    confidence=0.0
-                )
-                
-        except Exception as e:
-            self._log(f"Error analyzing chunk {chunk_index}: {e}")
-            self.monitor.add_error(f"Analysis error in chunk {chunk_index}: {str(e)}")
-            return ChunkAnalysis(
-                chunk_index=chunk_index,
-                chunk_type=ChunkType.UNKNOWN,
-                confidence=0.0
-            )
-    
-    def _extract_content(
-        self, 
-        chunk: str, 
-        analysis: ChunkAnalysis, 
-        parsing_state: ParsingState
-    ) -> Optional[Dict]:
-        """Extract structured content from a chunk based on analysis."""
-        
-        context = f"Chunk {analysis.chunk_index}, Type: {analysis.chunk_type}"
-        accumulated_content = ""
-        expected_schema = ""
-        
-        if analysis.chunk_type in [ChunkType.SECTION_START, ChunkType.SECTION_CONTINUATION]:
-            if parsing_state.current_section:
-                accumulated_content = parsing_state.current_section.accumulated_content
-            expected_schema = "FullSectionResponseSchema"
-        elif analysis.chunk_type in [ChunkType.ELEMENT_START, ChunkType.ELEMENT_CONTINUATION, ChunkType.ELEMENT_COMPLETE]:
-            if parsing_state.current_element:
-                accumulated_content = parsing_state.current_element.accumulated_content
-            expected_schema = "FullSectionElementSchema"
-        
-        prompt = CONTENT_EXTRACTION_PROMPT.format(
-            context=context,
-            content_type=analysis.chunk_type,
-            accumulated_content=accumulated_content,
-            chunk_content=chunk,
-            expected_schema=expected_schema
-        )
-        
-        messages = [{"role": "assistant", "content": SYSTEM_PROMPT},{"role": "user", "content": prompt}]
-        
-        try:
-            # Use appropriate response format based on content type
-            if analysis.chunk_type in [ChunkType.SECTION_START, ChunkType.SECTION_CONTINUATION]:
-                response_format = FullSectionResponseSchema
-            else:
-                response_format = FullSectionElementSchema
-            
-            response = self.llm_client.completion(
-                messages=messages,
-                response_format=response_format,
-                provider=LLM_PROVIDER,
-                model=LLM_MODEL,
-                temperature=0.1,
-                max_tokens=8192
-            )
-            
-            if 'parsed' in response and response['parsed']:
-                # Update monitoring
-                self.monitor.complete_chunk_extraction(analysis.chunk_index)
-                
-                # Track token usage if available
-                if 'usage' in response:
-                    usage = response['usage']
-                    self.monitor.update_token_usage(
-                        usage.get('prompt_tokens', 0),
-                        usage.get('completion_tokens', 0)
-                    )
-                
-                return response['parsed'].dict()
-            
-        except Exception as e:
-            self._log(f"Error extracting content from chunk {analysis.chunk_index}: {e}")
-            self.monitor.add_error(f"Extraction error in chunk {analysis.chunk_index}: {str(e)}")
-        
-        return None
-    
-    def _update_parsing_state(
-        self, 
-        chunk: str, 
-        analysis: ChunkAnalysis, 
-        extracted_content: Optional[Dict],
-        parsing_state: ParsingState
-    ) -> None:
-        """Update parsing state based on chunk analysis and extracted content."""
-        
-        parsing_state.current_chunk_index = analysis.chunk_index
-        parsing_state.last_chunk_type = analysis.chunk_type
-        
-        # Handle section-level changes
-        if analysis.chunk_type == ChunkType.SECTION_START:
-            # Complete current section if exists
-            if parsing_state.current_section and parsing_state.current_section.is_complete:
-                self._finalize_current_section(parsing_state)
-            
-            # Start new section
-            parsing_state.current_section = PartialSection(
-                accumulated_content=chunk
-            )
-            parsing_state.parsing_phase = "section"
-            parsing_state.global_position_counters["section"] += 1
-            
-            if extracted_content:
-                self._merge_section_content(parsing_state.current_section, extracted_content)
-        
-        elif analysis.chunk_type == ChunkType.SECTION_CONTINUATION:
-            if parsing_state.current_section:
-                parsing_state.current_section.accumulated_content += "\n" + chunk
-                if extracted_content:
-                    self._merge_section_content(parsing_state.current_section, extracted_content)
-        
-        elif analysis.chunk_type == ChunkType.ELEMENT_START:
-            # Complete current element if exists
-            if parsing_state.current_element and parsing_state.current_element.is_complete:
-                self._finalize_current_element(parsing_state)
-            
-            # Start new element
-            parsing_state.current_element = PartialElement(
-                accumulated_content=chunk
-            )
-            parsing_state.parsing_phase = "element"
-            parsing_state.global_position_counters["element"] += 1
-            
-            if extracted_content:
-                self._merge_element_content(parsing_state.current_element, extracted_content)
-        
-        elif analysis.chunk_type == ChunkType.ELEMENT_CONTINUATION:
-            if parsing_state.current_element:
-                parsing_state.current_element.accumulated_content += "\n" + chunk
-                if extracted_content:
-                    self._merge_element_content(parsing_state.current_element, extracted_content)
-        
-        elif analysis.chunk_type == ChunkType.ELEMENT_COMPLETE:
-            if parsing_state.current_element:
-                parsing_state.current_element.accumulated_content += "\n" + chunk
-                if extracted_content:
-                    self._merge_element_content(parsing_state.current_element, extracted_content)
-                parsing_state.current_element.is_complete = True
-        
-        elif analysis.chunk_type == ChunkType.SECTION_COMPLETE:
-            if parsing_state.current_section:
-                parsing_state.current_section.is_complete = True
-        
-        # Update context buffer
-        parsing_state.context_buffer = chunk[-self.chunk_overlap:] if len(chunk) > self.chunk_overlap else chunk
-        
-        # Update monitoring with current previews
-        section_preview = None
-        element_preview = None
-        
-        if parsing_state.current_section:
-            section_preview = {
-                "code": parsing_state.current_section.code,
-                "label": parsing_state.current_section.label,
-                "elements_count": len(parsing_state.current_section.elements or [])
-            }
-        
-        if parsing_state.current_element:
-            element_preview = {
-                "code": parsing_state.current_element.code,
-                "label": parsing_state.current_element.label,
-                "type": parsing_state.current_element.type,
-                "variables_count": len(parsing_state.current_element.variables or []),
-                "columns_count": len(parsing_state.current_element.columns or [])
-            }
-        
-        self.monitor.update_current_previews(section_preview, element_preview)
-        
-        # Update content counts
-        total_elements = sum(len(section.elements or []) for section in parsing_state.completed_sections)
-        if parsing_state.current_section and parsing_state.current_section.elements:
-            total_elements += len(parsing_state.current_section.elements)
-        
-        total_variables = 0
-        total_columns = 0
-        for section in parsing_state.completed_sections:
-            for element in section.elements or []:
-                total_variables += len(element.variables or [])
-                total_columns += len(element.columns or [])
-        
-        self.monitor.update_content_counts(
-            len(parsing_state.completed_sections),
-            total_elements,
-            total_variables,
-            total_columns
-        )
-    
-    def _merge_section_content(self, partial_section: PartialSection, content: Dict) -> None:
-        """Merge extracted content into partial section."""
-        for key, value in content.items():
-            if value is not None:
-                if key == "elements":
-                    # Handle elements separately
-                    continue
-                setattr(partial_section, key, value)
-    
-    def _merge_element_content(self, partial_element: PartialElement, content: Dict) -> None:
-        """Merge extracted content into partial element."""
-        for key, value in content.items():
-            if value is not None:
-                if key in ["variables", "columns"]:
-                    # Merge lists
-                    current_list = getattr(partial_element, key, [])
-                    if isinstance(value, list):
-                        # Merge by code/id to avoid duplicates
-                        existing_codes = {item.get('code') for item in current_list if isinstance(item, dict)}
-                        for item in value:
-                            if isinstance(item, dict) and item.get('code') not in existing_codes:
-                                current_list.append(item)
-                        setattr(partial_element, key, current_list)
-                else:
-                    setattr(partial_element, key, value)
-    
-    def _finalize_current_element(self, parsing_state: ParsingState) -> None:
-        """Finalize current element and add to current section."""
-        if not parsing_state.current_element:
-            return
-        
-        # Convert partial element to full schema
-        element_data = {
-            "code": parsing_state.current_element.code or f"element_{parsing_state.global_position_counters['element']}",
-            "label": parsing_state.current_element.label or "Untitled Element",
-            "type": parsing_state.current_element.type or "CHOICE",
-            "position": parsing_state.current_element.position or parsing_state.global_position_counters["element"],
-            "notes": parsing_state.current_element.notes,
-            "revision": parsing_state.current_element.revision,
-            "tags": parsing_state.current_element.tags,
-            "is_loop_target": parsing_state.current_element.is_loop_target,
-            "help_text": parsing_state.current_element.help_text,
-            "variables": parsing_state.current_element.variables,
-            "columns": parsing_state.current_element.columns
-        }
-        
-        try:
-            element = FullSectionElementSchema(**element_data)
-            
-            # Add to current section
-            if parsing_state.current_section:
-                if not hasattr(parsing_state.current_section, 'elements') or parsing_state.current_section.elements is None:
-                    parsing_state.current_section.elements = []
-                parsing_state.current_section.elements.append(PartialElement(**element.dict()))
-            
-        except Exception as e:
-            self._log(f"Error finalizing element: {e}")
-        
-        # Clear current element
-        parsing_state.current_element = None
-    
-    def _finalize_current_section(self, parsing_state: ParsingState) -> None:
-        """Finalize current section and add to completed sections."""
-        if not parsing_state.current_section:
-            return
-        
-        # Finalize any pending element
-        if parsing_state.current_element:
-            self._finalize_current_element(parsing_state)
-        
-        # Convert partial elements to full schemas
-        elements = []
-        if parsing_state.current_section.elements:
-            for partial_elem in parsing_state.current_section.elements:
-                if isinstance(partial_elem, PartialElement):
-                    elem_data = {
-                        "code": partial_elem.code or f"element_{len(elements) + 1}",
-                        "label": partial_elem.label or "Untitled Element",
-                        "type": partial_elem.type or "CHOICE",
-                        "position": partial_elem.position or len(elements) + 1,
-                        "notes": partial_elem.notes,
-                        "revision": partial_elem.revision,
-                        "tags": partial_elem.tags,
-                        "is_loop_target": partial_elem.is_loop_target,
-                        "help_text": partial_elem.help_text,
-                        "variables": partial_elem.variables,
-                        "columns": partial_elem.columns
-                    }
-                    try:
-                        elements.append(FullSectionElementSchema(**elem_data))
-                    except Exception as e:
-                        self._log(f"Error converting partial element: {e}")
-        
-        # Create full section
-        section_data = {
-            "code": parsing_state.current_section.code or f"section_{parsing_state.global_position_counters['section']}",
-            "label": parsing_state.current_section.label or "Untitled Section",
-            "position": parsing_state.current_section.position or parsing_state.global_position_counters["section"],
-            "notes": parsing_state.current_section.notes,
-            "loop": parsing_state.current_section.loop,
-            "elements": elements
-        }
-        
-        try:
-            section = FullSectionResponseSchema(**section_data)
-            parsing_state.completed_sections.append(section)
-            
-            # Update monitoring
-            self.monitor.add_completed_section(section.dict())
-            
-        except Exception as e:
-            self._log(f"Error finalizing section: {e}")
-            self.monitor.add_error(f"Error finalizing section: {str(e)}")
-        
-        # Clear current section
-        parsing_state.current_section = None
     
     def process_markdown_file(
         self, 
@@ -620,18 +219,14 @@ class MarkdownChunkProcessor:
         """
         file_path = Path(file_path)
         
-        if not file_path.exists():
-            raise FileNotFoundError(f"Markdown file not found: {file_path}")
-        
         self._log(f"Processing markdown file: {file_path}")
         
         # Read file content
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        content = self.file_handler.read_markdown_file(file_path)
         
         # Split into chunks
         self.monitor.update_phase(ProcessingPhase.CHUNKING)
-        chunks = self._chunk_markdown(content)
+        chunks = self.chunker.chunk_markdown(content)
         self._log(f"Split into {len(chunks)} chunks")
         
         # Initialize monitoring
@@ -645,7 +240,6 @@ class MarkdownChunkProcessor:
         
         # Process each chunk
         self.monitor.update_phase(ProcessingPhase.ANALYZING)
-        total_tokens = {"input": 0, "output": 0}
         errors = []
         warnings = []
         
@@ -659,15 +253,28 @@ class MarkdownChunkProcessor:
                 self.monitor.start_chunk(i, len(chunk))
                 
                 # Analyze chunk
-                analysis = self._analyze_chunk(chunk, i, len(chunks), parsing_state)
+                analysis = self.analyzer.analyze_chunk(
+                    chunk, i, len(chunks), parsing_state, self.monitor
+                )
                 
                 # Extract content if needed
                 extracted_content = None
-                if analysis.chunk_type != ChunkType.UNKNOWN:
-                    extracted_content = self._extract_content(chunk, analysis, parsing_state)
+                if analysis.chunk_type.value != "UNKNOWN":
+                    extracted_content = self.extractor.extract_content(
+                        chunk, analysis, parsing_state, self.monitor
+                    )
                 
                 # Update parsing state
-                self._update_parsing_state(chunk, analysis, extracted_content, parsing_state)
+                self.state_manager.update_parsing_state(
+                    chunk, analysis, extracted_content, parsing_state, self.monitor
+                )
+                
+                # Handle finalization if needed
+                if parsing_state.current_element and parsing_state.current_element.is_complete:
+                    self.finalizer.finalize_current_element(parsing_state, self.monitor)
+                
+                if parsing_state.current_section and parsing_state.current_section.is_complete:
+                    self.finalizer.finalize_current_section(parsing_state, self.monitor)
                 
                 # Complete chunk in monitor
                 self.monitor.complete_chunk(i)
@@ -682,9 +289,9 @@ class MarkdownChunkProcessor:
         # Finalize any remaining content
         self.monitor.update_phase(ProcessingPhase.FINALIZING)
         if parsing_state.current_element:
-            self._finalize_current_element(parsing_state)
+            self.finalizer.finalize_current_element(parsing_state, self.monitor)
         if parsing_state.current_section:
-            self._finalize_current_section(parsing_state)
+            self.finalizer.finalize_current_section(parsing_state, self.monitor)
         
         # Build final survey schema
         survey = FullSurveyResponseSchema(
@@ -696,8 +303,7 @@ class MarkdownChunkProcessor:
         
         # Get final token usage from monitor
         monitor_report = self.monitor.get_current_report()
-        if monitor_report:
-            total_tokens = monitor_report.token_usage
+        total_tokens = monitor_report.token_usage if monitor_report else {"input": 0, "output": 0}
         
         # Create result
         result = ProcessingResult(
@@ -706,8 +312,8 @@ class MarkdownChunkProcessor:
                 "total_chunks": len(chunks),
                 "sections_found": len(parsing_state.completed_sections),
                 "elements_found": sum(len(section.elements or []) for section in parsing_state.completed_sections),
-                "chunk_size": self.chunk_size,
-                "chunk_overlap": self.chunk_overlap
+                "chunk_size": self.chunker.chunk_size,
+                "chunk_overlap": self.chunker.chunk_overlap
             },
             chunks_processed=len(chunks),
             sections_found=len(parsing_state.completed_sections),
@@ -719,26 +325,7 @@ class MarkdownChunkProcessor:
         
         # Save results if output directory specified
         if output_dir:
-            output_dir = Path(output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Save survey JSON
-            survey_file = output_dir / f"{file_path.stem}_survey.json"
-            with open(survey_file, 'w', encoding='utf-8') as f:
-                json.dump(survey.dict(), f, indent=2, ensure_ascii=False)
-            
-            # Save processing report
-            report_file = output_dir / f"{file_path.stem}_processing_report.json"
-            with open(report_file, 'w', encoding='utf-8') as f:
-                json.dump(result.dict(), f, indent=2, ensure_ascii=False, default=str)
-            
-            # Save final partial report
-            if monitor_report:
-                partial_report_file = output_dir / f"{file_path.stem}_partial_report_final.json"
-                with open(partial_report_file, 'w', encoding='utf-8') as f:
-                    json.dump(monitor_report.dict(), f, indent=2, ensure_ascii=False, default=str)
-            
-            self._log(f"Results saved to: {output_dir}")
+            self.file_handler.save_results(result, file_path, output_dir, monitor_report)
         
         return result
     
