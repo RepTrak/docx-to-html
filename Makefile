@@ -13,11 +13,11 @@ build:
 	@echo "Building Docker image: $(IMAGE_NAME)"
 	docker build -t $(IMAGE_NAME) .
 
-run: build
+run:
 	docker run --rm -it \
 		-v $(INPUT_DIR):/input \
 		-v $(OUTPUT_DIR):/output \
-		$(IMAGE_NAME) 
+		$(IMAGE_NAME) libreoffice --headless --writer --help
 
 # Convert DOCX files to HTML
 convert: build

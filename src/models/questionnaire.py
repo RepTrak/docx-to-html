@@ -71,7 +71,20 @@ class SectionElementResponseSchema(BaseModel):
     code: str
     label: str
     notes: Optional[str] = None
-    type: Literal["CHOICE", "OPEN_END", "BREAK_PAGE"]
+    type: Literal[
+                "CHOICE",
+                "OPEN_END",
+                "BREAK_PAGE",
+                "SCREENER",
+                "COUNTRY_DROPDOWN",
+                "AGE_ORI",
+                "S105_RATING_FAMILIARITY",
+                "GEOGRAPHIC_AREA_REGION",
+                "PULSE_FILTER",
+                "YES_NO",
+                "EDUCATION_STANDARD",
+                "INCOME_STANDARD",
+                  ]
     position: Optional[int] = None
     revision: Optional[int] = None
     tags: Optional[List[AttributeTagSchema]] = None

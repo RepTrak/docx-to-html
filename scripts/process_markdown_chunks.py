@@ -23,6 +23,7 @@ from src.utils.monitoring_utils import (
     save_report_callback,
     ProgressMonitoringThread
 )
+from src.utils.file_manager import FileManager, ResultsManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,13 +45,13 @@ logger = logging.getLogger(__name__)
 @click.option(
     '--chunk-size',
     type=int,
-    default=256,
+    default=2000,
     help='Size of each chunk in characters (default: 2000)'
 )
 @click.option(
     '--chunk-overlap',
     type=int,
-    default=20,
+    default=200,
     help='Overlap between chunks in characters (default: 200)'
 )
 @click.option(
@@ -120,8 +121,12 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
         click.echo("Note: --monitor-only overrides --verbose for cleaner monitoring display")
         ctx.obj['verbose'] = False
     
-    # Determine monitoring directory
-    monitoring_dir = ctx.obj['monitoring_dir'] or output_dir or input_file.parent / "monitoring"
+    # Initialize file management
+    file_manager = FileManager()
+    directories = file_manager.setup_output_directories(input_file, output_dir)
+    results_manager = ResultsManager(file_manager)
+    
+    monitoring_dir = ctx.obj['monitoring_dir'] or directories['monitoring']
     
     # Create progress callback
     progress_callback = None
@@ -160,7 +165,7 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
         retry_attempts=ctx.obj['retry_attempts'],
         progress_callback=progress_callback,
         auto_save_interval=ctx.obj['auto_save_interval'],
-        auto_save_dir=str(monitoring_dir) if monitoring_dir else None
+        auto_save_dir=str(directories['temp'])
     )
     
     # Start monitoring thread if using dashboard and monitor_only
@@ -176,13 +181,27 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
     try:
         result = processor.process_markdown_file(
             file_path=input_file,
-            output_dir=output_dir
+            output_dir=directories['output']
         )
         
         # Stop monitoring thread
         if monitor_thread:
             monitor_thread.stop()
             time.sleep(1)  # Give it time to clean up
+        
+        # Save results
+        try:
+            output_path = results_manager.save_processing_result(result, input_file, directories['output'])
+            
+            # Save error report if there are errors or warnings
+            if result.errors or result.warnings:
+                results_manager.save_error_report(
+                    result.errors, result.warnings, input_file, monitoring_dir
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to save results: {e}")
+            click.echo(f"✗ Failed to save results: {e}", err=True)
         
         # Print final results
         if not monitor_only:
@@ -192,6 +211,7 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
             click.echo(f"✓ Elements found: {result.elements_found}")
             click.echo(f"✓ Chunks processed: {result.chunks_processed}")
             click.echo(f"✓ Token usage: {result.total_tokens_used.get('input', 0)} input, {result.total_tokens_used.get('output', 0)} output")
+            click.echo(f"💾 Results saved to: {output_path}")
         else:
             # Clear screen and show final summary
             print("\033[2J\033[H", end="")
@@ -203,10 +223,9 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
             click.echo(f"✅ Elements found: {result.elements_found}")
             click.echo(f"✅ Chunks processed: {result.chunks_processed}")
             click.echo(f"🪙 Token usage: {result.total_tokens_used.get('input', 0):,} input, {result.total_tokens_used.get('output', 0):,} output")
+            click.echo(f"💾 Results saved to: {output_path}")
             
-            if output_dir:
-                click.echo(f"💾 Results saved to: {output_dir}")
-            if monitoring_dir and save_progress:
+            if save_progress:
                 click.echo(f"📊 Monitoring reports saved to: {monitoring_dir}")
         
         if result.errors:
@@ -223,6 +242,11 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
             if len(result.warnings) > 3:
                 click.echo(f"  ... and {len(result.warnings) - 3} more warnings")
         
+        # Cleanup temp files
+        cleaned_count = file_manager.cleanup_temp_files(directories['temp'])
+        if cleaned_count > 0:
+            logger.info(f"Cleaned up {cleaned_count} temporary files")
+        
         sys.exit(0 if not result.errors else 1)
         
     except KeyboardInterrupt:
@@ -230,29 +254,18 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
             monitor_thread.stop()
         click.echo(f"\n\n⚠ Processing interrupted by user")
         
-        # Try to get partial report
+        # Try to get partial report and save it
         partial_report = processor.get_partial_report()
-        if partial_report:
-            click.echo(f"📊 Progress when interrupted:")
-            click.echo(f"  Chunks completed: {partial_report.progress.chunks_completed}/{partial_report.progress.total_chunks}")
-            click.echo(f"  Sections found: {partial_report.progress.sections_found}")
-            click.echo(f"  Elements found: {partial_report.progress.elements_found}")
-            
-            if save_progress and monitoring_dir:
-                # Save final partial report
-                import json
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"interrupted_report_{timestamp}.json"
-                filepath = monitoring_dir / filename
-                monitoring_dir.mkdir(parents=True, exist_ok=True)
-                
-                try:
-                    with open(filepath, 'w', encoding='utf-8') as f:
-                        json.dump(partial_report.dict(), f, indent=2, ensure_ascii=False, default=str)
-                    click.echo(f"💾 Partial progress saved to: {filepath}")
-                except Exception as e:
-                    click.echo(f"❌ Failed to save partial progress: {e}", err=True)
+        if partial_report and save_progress:
+            try:
+                filepath = file_manager.save_partial_progress(
+                    partial_report.dict() if hasattr(partial_report, 'dict') else partial_report,
+                    monitoring_dir,
+                    prefix="interrupted_report"
+                )
+                click.echo(f"💾 Partial progress saved to: {filepath}")
+            except Exception as e:
+                click.echo(f"❌ Failed to save partial progress: {e}", err=True)
         
         sys.exit(130)  # Standard exit code for Ctrl+C
         
@@ -293,8 +306,13 @@ def process_file(ctx, input_file, output_dir, monitor_only, save_progress):
 def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, continue_on_error):
     """Process all markdown files in a directory with monitoring."""
     
+    # Initialize file management
+    file_manager = FileManager()
+    directories = file_manager.setup_output_directories(input_dir, output_dir)
+    results_manager = ResultsManager(file_manager)
+    
     # Find all markdown files
-    markdown_files = list(input_dir.glob("*.md")) + list(input_dir.glob("*.markdown"))
+    markdown_files = file_manager.find_markdown_files(input_dir)
     
     if not markdown_files:
         click.echo(f"✗ No markdown files found in: {input_dir}", err=True)
@@ -311,20 +329,18 @@ def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, conti
     )
     
     # Process each file
-    total_sections = 0
-    total_elements = 0
-    total_errors = 0
-    successful_files = 0
+    results = []
     processing_times = []
+    successful_files = 0
     
     for i, file_path in enumerate(markdown_files, 1):
         click.echo(f"\n{'='*60}")
         click.echo(f"[{i}/{len(markdown_files)}] Processing: {file_path.name}")
         click.echo(f"{'='*60}")
         
-        # Determine directories for this file
-        file_output_dir = output_dir or file_path.parent / "json_output"
-        monitoring_dir = ctx.obj['monitoring_dir'] or file_output_dir / "monitoring"
+        # Set up directories for this file
+        file_directories = file_manager.setup_output_directories(file_path, directories['output'] / file_path.stem)
+        monitoring_dir = ctx.obj['monitoring_dir'] or file_directories['monitoring']
         
         # Create progress callback for this file
         progress_callback = None
@@ -358,7 +374,7 @@ def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, conti
             retry_attempts=ctx.obj['retry_attempts'],
             progress_callback=progress_callback,
             auto_save_interval=ctx.obj['auto_save_interval'],
-            auto_save_dir=str(monitoring_dir) if monitoring_dir else None
+            auto_save_dir=str(file_directories['temp'])
         )
         
         # Start monitoring thread if using dashboard and monitor_only
@@ -376,20 +392,30 @@ def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, conti
         try:
             result = processor.process_markdown_file(
                 file_path=file_path,
-                output_dir=file_output_dir
+                output_dir=file_directories['output']
             )
             
             processing_time = time.time() - start_time
             processing_times.append(processing_time)
+            results.append(result)
             
             # Stop monitoring thread
             if monitor_thread:
                 monitor_thread.stop()
                 time.sleep(0.5)  # Give it time to clean up
             
-            total_sections += result.sections_found
-            total_elements += result.elements_found
-            total_errors += len(result.errors)
+            # Save results
+            try:
+                results_manager.save_processing_result(result, file_path, file_directories['output'])
+                
+                # Save error report if there are errors or warnings
+                if result.errors or result.warnings:
+                    results_manager.save_error_report(
+                        result.errors, result.warnings, file_path, monitoring_dir
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Failed to save results for {file_path}: {e}")
             
             if not result.errors:
                 successful_files += 1
@@ -400,6 +426,9 @@ def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, conti
                     for error in result.errors[:2]:
                         click.echo(f"    ✗ {error}", err=True)
             
+            # Cleanup temp files for this file
+            file_manager.cleanup_temp_files(file_directories['temp'])
+            
         except KeyboardInterrupt:
             if monitor_thread:
                 monitor_thread.stop()
@@ -409,10 +438,17 @@ def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, conti
         except Exception as e:
             if monitor_thread:
                 monitor_thread.stop()
-                
-            total_errors += 1
+            
             processing_time = time.time() - start_time
             processing_times.append(processing_time)
+            
+            # Create a dummy result for failed processing
+            failed_result = type('FailedResult', (), {
+                'sections_found': 0, 'elements_found': 0, 'chunks_processed': 0,
+                'total_tokens_used': {'input': 0, 'output': 0},
+                'errors': [str(e)], 'warnings': []
+            })()
+            results.append(failed_result)
             
             click.echo(f"\n  ✗ Error: {e} ({processing_time:.1f}s)", err=True)
             if ctx.obj['verbose']:
@@ -423,23 +459,39 @@ def process_batch(ctx, input_dir, output_dir, monitor_only, save_progress, conti
                 click.echo(f"Stopping batch processing due to error. Use --continue-on-error to process remaining files.")
                 break
     
-    # Print summary
-    click.echo(f"\n{'='*60}")
-    click.echo(f"🎯 BATCH PROCESSING SUMMARY")
-    click.echo(f"{'='*60}")
-    click.echo(f"Files processed: {len(processing_times)}/{len(markdown_files)}")
-    click.echo(f"Successful: {successful_files}")
-    click.echo(f"Failed: {len(processing_times) - successful_files}")
-    click.echo(f"Total sections found: {total_sections}")
-    click.echo(f"Total elements found: {total_elements}")
-    click.echo(f"Total errors: {total_errors}")
+    # Generate and save batch summary
+    try:
+        summary_data = results_manager.generate_processing_summary(results, processing_times, len(markdown_files))
+        summary_path = results_manager.save_batch_summary(summary_data, directories['output'])
+        
+        # Print summary
+        click.echo(f"\n{'='*60}")
+        click.echo(f"🎯 BATCH PROCESSING SUMMARY")
+        click.echo(f"{'='*60}")
+        summary = summary_data['processing_summary']
+        content = summary_data['content_summary']
+        timing = summary_data['timing_summary']
+        
+        click.echo(f"Files processed: {summary['processed_files']}/{summary['total_files']}")
+        click.echo(f"Successful: {summary['successful_files']}")
+        click.echo(f"Failed: {summary['failed_files']}")
+        click.echo(f"Success rate: {summary['success_rate']:.1f}%")
+        click.echo(f"Total sections found: {content['total_sections']}")
+        click.echo(f"Total elements found: {content['total_elements']}")
+        click.echo(f"Average processing time: {timing['average_processing_time']:.1f}s")
+        click.echo(f"Total processing time: {timing['total_processing_time']:.1f}s")
+        click.echo(f"💾 Summary saved to: {summary_path}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save batch summary: {e}")
+        click.echo(f"✗ Failed to save batch summary: {e}", err=True)
     
-    if processing_times:
-        avg_time = sum(processing_times) / len(processing_times)
-        total_time = sum(processing_times)
-        click.echo(f"Average processing time: {avg_time:.1f}s")
-        click.echo(f"Total processing time: {total_time:.1f}s")
+    # Cleanup main temp directory
+    cleaned_count = file_manager.cleanup_temp_files(directories['temp'])
+    if cleaned_count > 0:
+        logger.info(f"Cleaned up {cleaned_count} temporary files")
     
+    total_errors = sum(len(getattr(r, 'errors', [])) for r in results)
     sys.exit(0 if total_errors == 0 else 1)
 
 

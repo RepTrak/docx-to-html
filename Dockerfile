@@ -2,7 +2,6 @@ FROM python:3.11.9-slim
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
-
 # Install LibreOffice and essential dependencies
 RUN apt-get update && apt-get install -y \
     libreoffice \
@@ -17,7 +16,8 @@ RUN apt-get update && apt-get install -y \
 
 # Set working directory
 WORKDIR /app
-
+# RUN libreoffice --headless --convert-to html:"HTML (StarWriter)" --help
+# RUN unopkg add --shared -f -v ./writer2xhtml.oxt
 # Copy conversion script
 COPY . .
 RUN pip3 install -r requirements-dev.txt

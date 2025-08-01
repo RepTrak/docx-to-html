@@ -83,4 +83,13 @@ class FileHandler:
             with open(partial_report_file, 'w', encoding='utf-8') as f:
                 json.dump(monitor_report.dict(), f, indent=2, ensure_ascii=False, default=str)
         
+        # Save checkpoint summary if available
+        checkpoint_info = result.parsing_stats.get("checkpoint_info")
+        if checkpoint_info:
+            checkpoint_file = output_dir / f"{file_path.stem}_checkpoint_summary.json"
+            with open(checkpoint_file, 'w', encoding='utf-8') as f:
+                json.dump(checkpoint_info, f, indent=2, ensure_ascii=False, default=str)
+            
+            self._log(f"Checkpoint summary saved to: {checkpoint_file}")
+        
         self._log(f"Results saved to: {output_dir}")

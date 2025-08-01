@@ -44,6 +44,40 @@ class PartialSection(BaseModel):
     elements: List["PartialElement"] = []
     is_complete: bool = False
     accumulated_content: str = ""
+    
+    # Add fragment tracking
+    is_fragment: bool = False
+    starts_incomplete: bool = False
+    ends_incomplete: bool = False
+    fragment_metadata: Optional[Dict] = None
+    confidence_score: float = 1.0
+    
+    def update_from_extraction(self, extracted_data: Dict) -> None:
+        """Update partial section with extracted data."""
+        fragment_meta = extracted_data.pop('_fragment_metadata', {})
+        self.fragment_metadata = fragment_meta
+        self.is_fragment = fragment_meta.get('is_fragment', False)
+        self.starts_incomplete = fragment_meta.get('starts_incomplete', False)
+        self.ends_incomplete = fragment_meta.get('ends_incomplete', False)
+        self.confidence_score = fragment_meta.get('confidence', 1.0)
+        
+        # Update fields from extracted data
+        for key, value in extracted_data.items():
+            if value is not None and hasattr(self, key):
+                if key == "elements":
+                    self.merge_elements(value)
+                else:
+                    setattr(self, key, value)
+    
+    def merge_elements(self, new_elements: List[Dict]) -> None:
+        """Merge new elements with existing ones."""
+        if not self.elements:
+            self.elements = []
+        
+        existing_codes = {elem.get('code') for elem in self.elements if isinstance(elem, dict)}
+        for element in new_elements:
+            if isinstance(element, dict) and element.get('code') not in existing_codes:
+                self.elements.append(element)
 
 class PartialElement(BaseModel):
     """Represents an element being built incrementally."""
@@ -60,6 +94,41 @@ class PartialElement(BaseModel):
     columns: List[Dict[str, Any]] = []
     is_complete: bool = False
     accumulated_content: str = ""
+    
+    # Add fragment tracking
+    is_fragment: bool = False
+    starts_incomplete: bool = False
+    ends_incomplete: bool = False
+    fragment_metadata: Optional[Dict] = None
+    confidence_score: float = 1.0
+    
+    def update_from_extraction(self, extracted_data: Dict) -> None:
+        """Update partial element with extracted data."""
+        fragment_meta = extracted_data.pop('_fragment_metadata', {})
+        self.fragment_metadata = fragment_meta
+        self.is_fragment = fragment_meta.get('is_fragment', False)
+        self.starts_incomplete = fragment_meta.get('starts_incomplete', False)
+        self.ends_incomplete = fragment_meta.get('ends_incomplete', False)
+        self.confidence_score = fragment_meta.get('confidence', 1.0)
+        
+        # Update fields from extracted data
+        for key, value in extracted_data.items():
+            if value is not None and hasattr(self, key):
+                if key in ["variables", "columns"]:
+                    self.merge_list_field(key, value)
+                else:
+                    setattr(self, key, value)
+    
+    def merge_list_field(self, field_name: str, new_items: List[Dict]) -> None:
+        """Merge new items with existing list field."""
+        current_list = getattr(self, field_name, []) or []
+        existing_codes = {item.get('code') for item in current_list if isinstance(item, dict)}
+        
+        for item in new_items:
+            if isinstance(item, dict) and item.get('code') not in existing_codes:
+                current_list.append(item)
+        
+        setattr(self, field_name, current_list)
 
 class ParsingState(BaseModel):
     """Overall state of the parsing process."""

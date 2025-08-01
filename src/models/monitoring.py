@@ -55,6 +55,12 @@ class PartialReport(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     token_usage: Dict[str, int] = Field(default_factory=dict)
     
+    # Add checkpoint tracking
+    checkpoint_info: Optional[Dict[str, Any]] = None
+    sections_checkpointed: int = 0
+    elements_checkpointed: int = 0
+    last_checkpoint_time: Optional[datetime] = None
+    
     def get_completion_percentage(self) -> float:
         """Calculate completion percentage."""
         if self.progress.total_chunks == 0:
@@ -272,3 +278,20 @@ class ProcessingMonitor:
                 json.dump(self.partial_report.dict(), f, indent=2, ensure_ascii=False, default=str)
         except Exception as e:
             self.add_error(f"Failed to auto-save partial report: {e}")
+    
+    def update_checkpoint_info(
+        self, 
+        sections_checkpointed: int, 
+        elements_checkpointed: int,
+        checkpoint_summary: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Update checkpoint information."""
+        if not self.partial_report:
+            return
+            
+        self.partial_report.sections_checkpointed = sections_checkpointed
+        self.partial_report.elements_checkpointed = elements_checkpointed
+        self.partial_report.last_checkpoint_time = datetime.now()
+        
+        if checkpoint_summary:
+            self.partial_report.checkpoint_info = checkpoint_summary

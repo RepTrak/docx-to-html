@@ -4,20 +4,20 @@ Service for processing markdown files in chunks to build FullSurveyResponseSchem
 
 import logging
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime
 
 from ..llm import LLMClient
 from ..models.questionnaire import FullSurveyResponseSchema
-from ..models.parsing_state import ParsingState, ProcessingResult
+from ..models.parsing_state import ParsingState, ProcessingResult, ChunkAnalysis, ChunkType
 from ..models.monitoring import ProcessingMonitor, PartialReport, ProcessingPhase
 
-from .chunking.text_chunker import TextChunker
-from .analysis.chunk_analyzer import ChunkAnalyzer
+from .chunking.strategies.delimiter_strategy import DelimiterStrategy
 from .extraction.content_extractor import ContentExtractor
 from .state.state_manager import StateManager
 from .finalization.schema_finalizer import SchemaFinalizer
 from .io.file_handler import FileHandler
+from .checkpoints.checkpoint_manager import CheckpointManager
 
 LLM_PROVIDER = "openai"  # Default provider
 LLM_MODEL = "gpt-4o-mini-2024-07-18"  # Default model
@@ -69,12 +69,26 @@ The provided content will follow a specific structure, and your task is to extra
 
 ### Elements format
 | element input | expected output |
-| `**cQCA\\_Language\\_CA** :\r\n\r\nWould you prefer to complete the survey in English or French?\r\n\r\nPr\u00E9f\u00E9rez\\-vous r\u00E9pondre \u00E0 ce questionnaire en\r\nAnglais ou en Fran\u00E7ais?\r\n\r\n* **SINGLE\r\n ANSWER**\r\n* **Prog:\r\n show default instruction text side\\-by\\-side in both English\r\n (code\\=1000\\) and French (Code\\=3000\\).**\r\n\r\n| **Value** **Code** | **Value** **Label** |\r\n| 1 | English\/Anglais |\r\n| 2 | French\/Fran\u00E7ais |` | `{"code": "cQCA_Language_CA", "label": "nWould you prefer to complete the survey in English or French?\r\n\r\nPr\u00E9f\u00E9rez\\-vous r\u00E9pondre \u00E0 ce questionnaire en\r\nAnglais ou en Fran\u00E7ais?\r\n\r\n", "type": "CHOICE", "position": 1, "variables": [{"code": "1", "label": "English/Anglais", "position": 1}, {"code": "2", "label": "French/Fran\u00E7ais", "position": 2}], "help_text": null, notes: "* **SINGLE ANSWER**\n* **Prog: show default instruction text side-by-side in both English (code=1000) and French (Code=3000).**"}` |
-| `**Gender**:What is your gender?\r\n\r\n* **SINGLE\r\n ANSWER**\r\n\r\n| **Value****Code** | **Value****Label** |\r\n| 1 | Male |\r\n| 2 | Female |` | {"code":"Gender", "type": "CHOICE", "label": "What is your gender?", "variables": [{"code":"1", "label"Male"}, {"code":"2", "label"Female"}]}`|
-| `**AGE\\_ORI**:What is your age as of today?\r\n\r\n* **Programmer:** **Numeric\r\n open ended**\r\n\r\n    + **SHOW\r\n     AS A SINGLE SELECT RANGE FOR RUSSIA (AGE\\_RU). RECODE AS LISTED\r\n     BELOW**\r\n\r\n**Range for Russia:**\r\n\r\n* **Use\r\n Select One Instruction Text if RU:**\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435\r\n \u043E\u0434\u0438\u043D \u0432\u0430\u0440\u0438\u0430\u043D\u0442 \u043E\u0442\u0432\u0435\u0442\u0430.\r\n\r\n| **Value Code** | **Value Label** | **Notes** |\r\n| 0 | Under 18 | Terminate |\r\n| 1 | 18\\-24 | RECODE TO GENERATION \\= 2 and AGE \\= 1 |\r\n| 2 | 25\\-34 | RECODE TO GENERATION \\= 3 and AGE \\= 2 |\r\n| 3 | 35\\-40 | RECODE TO GENERATION \\= 3 and AGE \\= 3 |\r\n| 4 | 41\\-44 | RECODE TO GENERATION \\= 4 and AGE \\= 3 |\r\n| 5 | 45\\-55 | RECODE TO GENERATION \\= 4 and AGE \\= 4 |\r\n| 6 | 56\\-64 | RECODE TO GENERATION \\= 5 and AGE \\= 4 |\r\n| 7 | 65\\+ | RECODE TO GENERATION \\= 6 and AGE \\= 5 |\r\n\r\n* **Programmer:\r\n Valid** **Range\r\n \u201C0\\-115\u201D**\r\n\r\n**Terminate:** **if\r\nAGE\\_ORI is below 18**\r\n\r\n**Age \\[HIDDEN \u2013 recode Age from question\r\nAGE\\_ORI]:**\r\n\r\n| **Value Code** | **Value Label** | **Notes** |\r\n| 0 | Under 18 | Terminate |\r\n| 1 | 18\\-24 |  |\r\n| 2 | 25\\-34 |  |\r\n| 3 | 35\\-44 |  |\r\n| 4 | 45\\-64 |  |\r\n| 5 | 65\\+ |  |\r\n\r\n**GENERATION \\[HIDDEN \u2013 recode Generation\r\nfrom question AGE\\_ORI]:**\r\n\r\n| **Value Code** | **Value Label** | **Notes** |\r\n| 1 | Under 18 | Terminate |\r\n| 2 | 18\\-25 | **GenZ** |\r\n| 3 | 26\\-40 | **Millennials** |\r\n| 4 | 41\\-55 | **GenX** |\r\n| 5 | 56\\-64 | **Baby Boomers** |\r\n| 6 | 65\\+ | **Older Baby Boomers \/ Silent Generation** |\r\n\r\n**\\[PN: IF AUSTRALIA (CODE\\=26\\) OR NEW ZEALAND\r\n(CODE\\=198\\): SHOW POSTCODE AND REGION\\_C ON SAME SCREEN]**\r\n\r\n**PN: ASK POSTCODE IF AUSTRALIA (CODE\\=26\\) OR\r\nNEW ZEALAND (CODE\\=198\\)**` | {"code":"AGE_ORI", "type": "AGE_ORI", "label": "What is your age as of today?"}`|
-| `**Q215**: The next questions concern\r\na number of different attitudes or behaviors you might have toward a\r\ncompany.\r\n\r\nPlease consider how well they describe your attitude toward**\\<b\\>{\\#Company1}\\<\/b\\>**.\r\n\r\nPlease select a number from 1 to 7 where \u201C1\u201D means \u201CI strongly\r\ndisagree\u201D and \u201C7\u201D means \u201CI strongly agree\u201D.\r\n\r\n* **SINGLE\r\n ANSWER EACH ITEM.**\r\n* **RANDOMIZE.**\r\n* **PLEASE\r\n DISPLAY SCALE RESPONSE (I strongly agree 1, 2, \u2026, Not sure) ALSO\r\n AT THE BOTTOM OF THE GRID**\r\n* **PN:\r\n if respondent qualifies to rate Company 2, use variable naming\r\n \u201CQ216\u201D**\r\n* **PN:\r\n if respondent qualifies to rate Company 3, use variable naming\r\n \u201CQ217\u201D**\r\n\r\n| **Variable Name** | **Variable Label** | **NOTES** |\r\n| Q215\\_3 | I would say something positive about **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_4 | I would give the benefit of the doubt to **\\<b\\>{\\#Company1}\\<\/b\\>** if the company was facing a crisis |  |\r\n| Q215\\_5 | If **\\<b\\>{\\#Company1}\\<\/b\\>** was faced with a product  or service problem, I would trust them to do the right thing |  |\r\n| Q215\\_6 | **SHOW  DEFAULT TEXT:**If I had the opportunity, I would buy the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>** **UNLESS  AUSTRALIA (CODE\\=26\\) AND ONE OF THE FOLLOWING COMPANIES:*** **AustralianSuper  (COMPANY CODE \\= 260622\\)** * **HESTA  (COMPANY CODE \\= 260674\\)** * **Hostplus  (COMPANY CODE \\= 260675\\)** * **Rest  Super (COMPANY CODE \\= 260684\\)** * **QSuper  (COMPANY CODE \\= 260788\\)** * **Aware  Super (COMPANY CODE \\= 260789\\)** * **Australian  Retirement Trust (COMPANY CODE \\= 260826\\)** * **UniSuper  (COMPANY CODE \\= 260854\\)** **SHOW TEXT:**If I had the opportunity, I would be a  member of **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_7 | **SHOW  DEFAULT TEXT:**If I had the opportunity, I would invest in **\\<b\\>{\\#Company1}\\<\/b\\>** **UNLESS  AUSTRALIA (CODE\\=26\\) AND ONE OF THE FOLLOWING COMPANIES:*** **AustralianSuper  (COMPANY CODE \\= 260622\\)** * **HESTA  (COMPANY CODE \\= 260674\\)** * **Hostplus  (COMPANY CODE \\= 260675\\)** * **Rest  Super (COMPANY CODE \\= 260684\\)** * **QSuper  (COMPANY CODE \\= 260788\\)** * **Aware  Super (COMPANY CODE \\= 260789\\)** * **Australian  Retirement Trust (COMPANY CODE \\= 260826\\)** * **UniSuper  (COMPANY CODE \\= 260854\\)** **SHOW TEXT:**I would recommend to someone to invest their  super with **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_8 | If I had the opportunity, I would work for **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_10 | I would recommend the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n\r\n* **Programmer:\r\n Show scale numbers, except on \u201CNot sure\u201D**\r\n\r\n| **Value Code** | **Value Label** |\r\n| 1 | I strongly disagree 1 |\r\n| 2 | 2 |\r\n| 3 | 3 |\r\n| 4 | 4 |\r\n| 5 | 5 |\r\n| 6 | 6 |\r\n| 7 | I strongly agree 7 |\r\n| 99 | Not sure |` | {"code":"Q215", "type": "AGE_ORI", "label": "The next questions concern\r\na number of different attitudes or behaviors you might have toward a\r\ncompany.\r\n\r\nPlease consider how well they describe your attitude toward**\\<b\\>{\\#Company1}\\<\/b\\>**.\r\n\r\nPlease select a number from 1 to 7 where \u201C1\u201D means \u201CI strongly\r\ndisagree\u201D and \u201C7\u201D means \u201CI strongly agree\u201D.", "options": {"randomize_variables":true, "columns": [{"code":"1", "label":"I strongly disagree 1", ....}]}, "variables":[{"code":"3","label":"I would say something positive about **\\<b\\>{\\#Company1}\\<\/b\\>", ..., "code":"6","label":"If I had the opportunity, I would buy the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>", notes: "**SHOW  DEFAULT TEXT:**If I had the opportunity, I would buy the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>** **UNLESS  AUSTRALIA (CODE\\=26\\) AND ONE OF THE FOLLOWING COMPANIES:*** **AustralianSuper  (COMPANY CODE \\= 260622\\)** * **HESTA  (COMPANY CODE \\= 260674\\)** * **Hostplus  (COMPANY CODE \\= 260675\\)** * **Rest  Super (COMPANY CODE \\= 260684\\)** * **QSuper  (COMPANY CODE \\= 260788\\)** * **Aware  Super (COMPANY CODE \\= 260789\\)** * **Australian  Retirement Trust (COMPANY CODE \\= 260826\\)** * **UniSuper  (COMPANY CODE \\= 260854\\)** **SHOW TEXT:**If I had the opportunity, I would be a  member of **\\<b\\>{\\#Company1}\\<\/b\\>**"}], "columns": [{"code":"1", "label":"I strongly disagree 1", ....}]}`|
+| `**cQCA\\_Language\\_CA** [CHOICE]:\r\n\r\nWould you prefer to complete the survey in English or French?\r\n===\r\nPr\u00E9f\u00E9rez\\-vous r\u00E9pondre \u00E0 ce questionnaire en\r\nAnglais ou en Fran\u00E7ais?\r\n\r\n* **SINGLE\r\n ANSWER**\r\n* **Prog:\r\n show default instruction text side\\-by\\-side in both English\r\n (code\\=1000\\) and French (Code\\=3000\\).**\r\n\r\n| **Value** **Code** | **Value** **Label** |\r\n| 1 | English\/Anglais |\r\n| 2 | French\/Fran\u00E7ais |` | `{"code": "cQCA_Language_CA", "label": "nWould you prefer to complete the survey in English or French?\r\n\r\nPr\u00E9f\u00E9rez\\-vous r\u00E9pondre \u00E0 ce questionnaire en\r\nAnglais ou en Fran\u00E7ais?\r\n\r\n", "type": "CHOICE", "position": 1, "variables": [{"code": "1", "label": "English/Anglais", "position": 1}, {"code": "2", "label": "French/Fran\u00E7ais", "position": 2}], "help_text": null, notes: "* **SINGLE ANSWER**\n* **Prog: show default instruction text side-by-side in both English (code=1000) and French (Code=3000).**"}` |
+| `**Gender**[CHOICE]:What is your gender?\r\n===\r\n* **SINGLE\r\n ANSWER**\r\n\r\n| **Value****Code** | **Value****Label** |\r\n| 1 | Male |\r\n| 2 | Female |` | {"code":"Gender", "type": "CHOICE", "label": "What is your gender?", "variables": [{"code":"1", "label"Male"}, {"code":"2", "label"Female"}]}`|
+| `**AGE\\_ORI**[AGE_ORI]:What is your age as of today?\r\n===\r\n* **Programmer:** **Numeric\r\n open ended**\r\n\r\n    + **SHOW\r\n     AS A SINGLE SELECT RANGE FOR RUSSIA (AGE\\_RU). RECODE AS LISTED\r\n     BELOW**\r\n\r\n**Range for Russia:**\r\n\r\n* **Use\r\n Select One Instruction Text if RU:**\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435\r\n \u043E\u0434\u0438\u043D \u0432\u0430\u0440\u0438\u0430\u043D\u0442 \u043E\u0442\u0432\u0435\u0442\u0430.\r\n\r\n| **Value Code** | **Value Label** | **Notes** |\r\n| 0 | Under 18 | Terminate |\r\n| 1 | 18\\-24 | RECODE TO GENERATION \\= 2 and AGE \\= 1 |\r\n| 2 | 25\\-34 | RECODE TO GENERATION \\= 3 and AGE \\= 2 |\r\n| 3 | 35\\-40 | RECODE TO GENERATION \\= 3 and AGE \\= 3 |\r\n| 4 | 41\\-44 | RECODE TO GENERATION \\= 4 and AGE \\= 3 |\r\n| 5 | 45\\-55 | RECODE TO GENERATION \\= 4 and AGE \\= 4 |\r\n| 6 | 56\\-64 | RECODE TO GENERATION \\= 5 and AGE \\= 4 |\r\n| 7 | 65\\+ | RECODE TO GENERATION \\= 6 and AGE \\= 5 |\r\n\r\n* **Programmer:\r\n Valid** **Range\r\n \u201C0\\-115\u201D**\r\n\r\n**Terminate:** **if\r\nAGE\\_ORI is below 18**\r\n\r\n**Age \\[HIDDEN \u2013 recode Age from question\r\nAGE\\_ORI]:**\r\n\r\n| **Value Code** | **Value Label** | **Notes** |\r\n| 0 | Under 18 | Terminate |\r\n| 1 | 18\\-24 |  |\r\n| 2 | 25\\-34 |  |\r\n| 3 | 35\\-44 |  |\r\n| 4 | 45\\-64 |  |\r\n| 5 | 65\\+ |  |\r\n\r\n**GENERATION \\[HIDDEN \u2013 recode Generation\r\nfrom question AGE\\_ORI]:**\r\n\r\n| **Value Code** | **Value Label** | **Notes** |\r\n| 1 | Under 18 | Terminate |\r\n| 2 | 18\\-25 | **GenZ** |\r\n| 3 | 26\\-40 | **Millennials** |\r\n| 4 | 41\\-55 | **GenX** |\r\n| 5 | 56\\-64 | **Baby Boomers** |\r\n| 6 | 65\\+ | **Older Baby Boomers \/ Silent Generation** |\r\n\r\n**\\[PN: IF AUSTRALIA (CODE\\=26\\) OR NEW ZEALAND\r\n(CODE\\=198\\): SHOW POSTCODE AND REGION\\_C ON SAME SCREEN]**\r\n\r\n**PN: ASK POSTCODE IF AUSTRALIA (CODE\\=26\\) OR\r\nNEW ZEALAND (CODE\\=198\\)**` | {"code":"AGE_ORI", "type": "AGE_ORI", "label": "What is your age as of today?"}`|
+| `**Q215**[CHOICE]: The next questions concern\r\na number of different attitudes or behaviors you might have toward a\r\ncompany.\r\n\r\nPlease consider how well they describe your attitude toward**\\<b\\>{\\#Company1}\\<\/b\\>**.\r\n\r\nPlease select a number from 1 to 7 where \u201C1\u201D means \u201CI strongly\r\ndisagree\u201D and \u201C7\u201D means \u201CI strongly agree\u201D.\r\n===\r\n* **SINGLE\r\n ANSWER EACH ITEM.**\r\n* **RANDOMIZE.**\r\n* **PLEASE\r\n DISPLAY SCALE RESPONSE (I strongly agree 1, 2, \u2026, Not sure) ALSO\r\n AT THE BOTTOM OF THE GRID**\r\n* **PN:\r\n if respondent qualifies to rate Company 2, use variable naming\r\n \u201CQ216\u201D**\r\n* **PN:\r\n if respondent qualifies to rate Company 3, use variable naming\r\n \u201CQ217\u201D**\r\n\r\n| **Variable Name** | **Variable Label** | **NOTES** |\r\n| Q215\\_3 | I would say something positive about **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_4 | I would give the benefit of the doubt to **\\<b\\>{\\#Company1}\\<\/b\\>** if the company was facing a crisis |  |\r\n| Q215\\_5 | If **\\<b\\>{\\#Company1}\\<\/b\\>** was faced with a product  or service problem, I would trust them to do the right thing |  |\r\n| Q215\\_6 | **SHOW  DEFAULT TEXT:**If I had the opportunity, I would buy the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>** **UNLESS  AUSTRALIA (CODE\\=26\\) AND ONE OF THE FOLLOWING COMPANIES:*** **AustralianSuper  (COMPANY CODE \\= 260622\\)** * **HESTA  (COMPANY CODE \\= 260674\\)** * **Hostplus  (COMPANY CODE \\= 260675\\)** * **Rest  Super (COMPANY CODE \\= 260684\\)** * **QSuper  (COMPANY CODE \\= 260788\\)** * **Aware  Super (COMPANY CODE \\= 260789\\)** * **Australian  Retirement Trust (COMPANY CODE \\= 260826\\)** * **UniSuper  (COMPANY CODE \\= 260854\\)** **SHOW TEXT:**If I had the opportunity, I would be a  member of **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_7 | **SHOW  DEFAULT TEXT:**If I had the opportunity, I would invest in **\\<b\\>{\\#Company1}\\<\/b\\>** **UNLESS  AUSTRALIA (CODE\\=26\\) AND ONE OF THE FOLLOWING COMPANIES:*** **AustralianSuper  (COMPANY CODE \\= 260622\\)** * **HESTA  (COMPANY CODE \\= 260674\\)** * **Hostplus  (COMPANY CODE \\= 260675\\)** * **Rest  Super (COMPANY CODE \\= 260684\\)** * **QSuper  (COMPANY CODE \\= 260788\\)** * **Aware  Super (COMPANY CODE \\= 260789\\)** * **Australian  Retirement Trust (COMPANY CODE \\= 260826\\)** * **UniSuper  (COMPANY CODE \\= 260854\\)** **SHOW TEXT:**I would recommend to someone to invest their  super with **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_8 | If I had the opportunity, I would work for **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n| Q215\\_10 | I would recommend the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>** |  |\r\n\r\n* **Programmer:\r\n Show scale numbers, except on \u201CNot sure\u201D**\r\n\r\n| **Value Code** | **Value Label** |\r\n| 1 | I strongly disagree 1 |\r\n| 2 | 2 |\r\n| 3 | 3 |\r\n| 4 | 4 |\r\n| 5 | 5 |\r\n| 6 | 6 |\r\n| 7 | I strongly agree 7 |\r\n| 99 | Not sure |` | {"code":"Q215", "type": "AGE_ORI", "label": "The next questions concern\r\na number of different attitudes or behaviors you might have toward a\r\ncompany.\r\n\r\nPlease consider how well they describe your attitude toward**\\<b\\>{\\#Company1}\\<\/b\\>**.\r\n\r\nPlease select a number from 1 to 7 where \u201C1\u201D means \u201CI strongly\r\ndisagree\u201D and \u201C7\u201D means \u201CI strongly agree\u201D.", "options": {"randomize_variables":true, "columns": [{"code":"1", "label":"I strongly disagree 1", ....}]}, "variables":[{"code":"3","label":"I would say something positive about **\\<b\\>{\\#Company1}\\<\/b\\>", ..., "code":"6","label":"If I had the opportunity, I would buy the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>", notes: "**SHOW  DEFAULT TEXT:**If I had the opportunity, I would buy the products\/services of **\\<b\\>{\\#Company1}\\<\/b\\>** **UNLESS  AUSTRALIA (CODE\\=26\\) AND ONE OF THE FOLLOWING COMPANIES:*** **AustralianSuper  (COMPANY CODE \\= 260622\\)** * **HESTA  (COMPANY CODE \\= 260674\\)** * **Hostplus  (COMPANY CODE \\= 260675\\)** * **Rest  Super (COMPANY CODE \\= 260684\\)** * **QSuper  (COMPANY CODE \\= 260788\\)** * **Aware  Super (COMPANY CODE \\= 260789\\)** * **Australian  Retirement Trust (COMPANY CODE \\= 260826\\)** * **UniSuper  (COMPANY CODE \\= 260854\\)** **SHOW TEXT:**If I had the opportunity, I would be a  member of **\\<b\\>{\\#Company1}\\<\/b\\>**"}], "columns": [{"code":"1", "label":"I strongly disagree 1", ....}]}`|
 
 ** In general any information that does not fit in the schema fields, must me placed in `notes` at section, element or variable level.***
+
+### Text format rules
+#### Sections
+Section have format: `Section {code} - {label}`
+#### Elements
+Element have format:
+```
+**{code}**[TYPE]: {label multi line text}
+{label multi line text}
+{label multi line text}
+===
+```
+Where `===` is the delimiter of the end of the label. After `===` you can found element options, programer notes (notes) and table with variables or columns.
+
 """
 
 CHUNK_ANALYSIS_PROMPT = """
@@ -228,24 +242,17 @@ class MarkdownChunkProcessor:
         llm_client: Optional[LLMClient] = None,
         chunk_size: int = 2000,
         chunk_overlap: int = 200,
-        verbose: bool = False,
+        verbose: bool = True,
         retry_attempts: int = 3,
         progress_callback: Optional[Callable[[PartialReport], None]] = None,
         auto_save_interval: int = 10,
-        auto_save_dir: Optional[str] = None
+        auto_save_dir: Optional[str] = None,
+        debug_chunks: bool = True,
+        enable_checkpoints: bool = True,
+        checkpoint_dir: Optional[str] = None
     ):
         """
         Initialize the chunk processor.
-        
-        Args:
-            llm_client: Optional LLM client instance
-            chunk_size: Size of each chunk in characters
-            chunk_overlap: Overlap between chunks in characters
-            verbose: Enable verbose logging
-            retry_attempts: Number of retry attempts for LLM calls
-            progress_callback: Optional callback for progress updates
-            auto_save_interval: Save partial results every N chunks
-            auto_save_dir: Directory for auto-saving partial results
         """
         self.verbose = verbose
         
@@ -257,17 +264,39 @@ class MarkdownChunkProcessor:
             retry_backoff=2.0
         )
         
-        # Initialize service components following SOLID principles
-        self.chunker = TextChunker(chunk_size, chunk_overlap)
-        self.analyzer = ChunkAnalyzer(
-            self.llm_client, SYSTEM_PROMPT, CHUNK_ANALYSIS_PROMPT, 
-            LLM_PROVIDER, LLM_MODEL, verbose
-        )
+        # Set up debug directory for chunks if enabled
+        debug_chunks_dir = None
+        if debug_chunks and auto_save_dir:
+            debug_chunks_dir = str(Path(auto_save_dir) / "debug_chunks")
+        
+        # Set up checkpoint directory
+        checkpoint_path = None
+        if enable_checkpoints:
+            if checkpoint_dir:
+                checkpoint_path = Path(checkpoint_dir)
+            elif auto_save_dir:
+                checkpoint_path = Path(auto_save_dir) / "checkpoints"
+        
+        # Initialize checkpoint manager
+        self.checkpoint_manager = CheckpointManager(
+            checkpoint_dir=checkpoint_path,
+            enable_checkpoints=enable_checkpoints,
+            verbose=verbose
+        ) if enable_checkpoints else None
+        
+        # Initialize service components with delimiter strategy
+        self.delimiter_chunker = DelimiterStrategy(chunk_size, chunk_overlap)
         self.extractor = ContentExtractor(
             self.llm_client, SYSTEM_PROMPT, CONTENT_EXTRACTION_PROMPT,
-            LLM_PROVIDER, LLM_MODEL, verbose
+            LLM_PROVIDER, LLM_MODEL, verbose,
+            debug_prompts=debug_chunks,
+            prompt_log_dir=debug_chunks_dir or "extraction_debug_logs"
         )
-        self.state_manager = StateManager(chunk_overlap, verbose)
+        self.state_manager = StateManager(
+            chunk_overlap, 
+            verbose,
+            checkpoint_manager=self.checkpoint_manager
+        )
         self.finalizer = SchemaFinalizer(verbose)
         self.file_handler = FileHandler(verbose)
         
@@ -283,32 +312,58 @@ class MarkdownChunkProcessor:
         if self.verbose:
             print(message)
     
+    def _create_simple_analysis(self, chunk: str, chunk_index: int) -> ChunkAnalysis:
+        """Create a simple analysis for delimiter-based chunks."""
+        # Simple heuristic analysis for delimiter chunks
+        chunk_type = ChunkType.UNKNOWN
+        confidence = 0.8
+        
+        # Check for element patterns
+        if chunk.strip().startswith('**') and '**:' in chunk:
+            chunk_type = ChunkType.ELEMENT_START
+            confidence = 0.9
+        # Check for section patterns
+        elif chunk.strip().startswith('#'):
+            chunk_type = ChunkType.SECTION_START
+            confidence = 0.9
+        # Check for table patterns (likely element continuation)
+        elif '|' in chunk and ('Value Code' in chunk or 'Variable Name' in chunk):
+            chunk_type = ChunkType.ELEMENT_CONTINUATION
+            confidence = 0.7
+        
+        return ChunkAnalysis(
+            chunk_index=chunk_index,
+            chunk_type=chunk_type,
+            confidence=confidence,
+            content_summary=chunk[:100] + "..." if len(chunk) > 100 else chunk,
+            has_section_header='#' in chunk and chunk.strip().startswith('#'),
+            has_element_header='**' in chunk and '**:' in chunk,
+            has_table_content='|' in chunk,
+            estimated_completion=1.0  # Delimiter chunks are typically complete
+        )
+    
     def process_markdown_file(
         self, 
         file_path: Path,
         output_dir: Optional[Path] = None
     ) -> ProcessingResult:
         """
-        Process a markdown file in chunks to build FullSurveyResponseSchema.
-        
-        Args:
-            file_path: Path to the markdown file
-            output_dir: Optional output directory for results
-            
-        Returns:
-            ProcessingResult with the complete survey schema and stats
+        Process a markdown file using delimiter-based chunking.
         """
         file_path = Path(file_path)
         
-        self._log(f"Processing markdown file: {file_path}")
+        self._log(f"Processing markdown file with delimiter strategy: {file_path}")
         
         # Read file content
         content = self.file_handler.read_markdown_file(file_path)
         
-        # Split into chunks
+        # Split using delimiter strategy
         self.monitor.update_phase(ProcessingPhase.CHUNKING)
-        chunks = self.chunker.chunk_markdown(content)
-        self._log(f"Split into {len(chunks)} chunks")
+        chunks = self.delimiter_chunker.chunk_text(content)
+        structure_map = self.delimiter_chunker.get_structure_map()
+        
+        self._log(f"Split into {len(chunks)} chunks using *** delimiter")
+        self._log(f"Structure map: {structure_map}")
         
         # Initialize monitoring
         self.monitor.initialize(str(file_path), len(chunks))
@@ -319,12 +374,18 @@ class MarkdownChunkProcessor:
             global_position_counters={"section": 0, "element": 0}
         )
         
-        # Process each chunk
+        # Log checkpoint session if enabled
+        if self.checkpoint_manager:
+            checkpoint_summary = self.checkpoint_manager.get_checkpoint_summary()
+            self._log(f"Checkpoint session started: {checkpoint_summary['session_id']}")
+            self.monitor.update_checkpoint_info(0, 0, checkpoint_summary)
+        
+        # Process each delimiter-separated chunk
         self.monitor.update_phase(ProcessingPhase.ANALYZING)
         errors = []
         warnings = []
         
-        logging.info(f"Starting processing of {len(chunks)} chunks")
+        logging.info(f"Starting processing of {len(chunks)} delimiter-separated chunks")
         
         for i, chunk in enumerate(chunks):
             try:
@@ -333,29 +394,32 @@ class MarkdownChunkProcessor:
                 # Start chunk in monitor
                 self.monitor.start_chunk(i, len(chunk))
                 
-                # Analyze chunk
-                analysis = self.analyzer.analyze_chunk(
-                    chunk, i, len(chunks), parsing_state, self.monitor
-                )
-                
-                # Extract content if needed
-                extracted_content = None
-                if analysis.chunk_type.value != "UNKNOWN":
-                    extracted_content = self.extractor.extract_content(
-                        chunk, analysis, parsing_state, self.monitor
+                # Save partial state checkpoint periodically
+                if self.checkpoint_manager and i % 5 == 0:
+                    self.checkpoint_manager.save_partial_state_checkpoint(
+                        parsing_state.current_section,
+                        parsing_state.current_element,
+                        i,
+                        additional_metadata={
+                            "processing_progress": f"{i+1}/{len(chunks)}",
+                            "completed_sections": len(parsing_state.completed_sections),
+                            "chunking_strategy": "delimiter"
+                        }
                     )
+                
+                # Create simple analysis for delimiter chunk
+                analysis = self._create_simple_analysis(chunk, i)
+                self._log(f"Chunk {i} analysis: {analysis.chunk_type.value} (confidence: {analysis.confidence})")
+                
+                # Extract content
+                extracted_content = self.extractor.extract_content(
+                    chunk, analysis, parsing_state, self.monitor
+                )
                 
                 # Update parsing state
                 self.state_manager.update_parsing_state(
                     chunk, analysis, extracted_content, parsing_state, self.monitor
                 )
-                
-                # Handle finalization if needed
-                if parsing_state.current_element and parsing_state.current_element.is_complete:
-                    self.finalizer.finalize_current_element(parsing_state, self.monitor)
-                
-                if parsing_state.current_section and parsing_state.current_section.is_complete:
-                    self.finalizer.finalize_current_section(parsing_state, self.monitor)
                 
                 # Complete chunk in monitor
                 self.monitor.complete_chunk(i)
@@ -366,14 +430,33 @@ class MarkdownChunkProcessor:
                 errors.append(error_msg)
                 self.monitor.complete_chunk(i, error_msg)
                 self._log(error_msg)
-                raise e  # Re-raise to stop processing on error
+                # Continue processing other chunks instead of stopping
+                continue
         
         # Finalize any remaining content
         self.monitor.update_phase(ProcessingPhase.FINALIZING)
         if parsing_state.current_element:
-            self.finalizer.finalize_current_element(parsing_state, self.monitor)
+            self.state_manager._finalize_current_element(parsing_state)
         if parsing_state.current_section:
-            self.finalizer.finalize_current_section(parsing_state, self.monitor)
+            self.state_manager._finalize_current_section(parsing_state)
+        
+        # Save final checkpoint
+        if self.checkpoint_manager:
+            self.checkpoint_manager.save_partial_state_checkpoint(
+                parsing_state.current_section,
+                parsing_state.current_element,
+                len(chunks),
+                additional_metadata={
+                    "processing_complete": True,
+                    "total_sections": len(parsing_state.completed_sections),
+                    "final_checkpoint": True,
+                    "chunking_strategy": "delimiter",
+                    "structure_map": structure_map
+                }
+            )
+        
+        # Finalize debugging session for content extractor
+        self.extractor.finalize_debugging_session(len(chunks))
         
         # Build final survey schema
         survey = FullSurveyResponseSchema(
@@ -387,15 +470,17 @@ class MarkdownChunkProcessor:
         monitor_report = self.monitor.get_current_report()
         total_tokens = monitor_report.token_usage if monitor_report else {"input": 0, "output": 0}
         
-        # Create result
+        # Create result with delimiter strategy info
         result = ProcessingResult(
             survey=survey,
             parsing_stats={
                 "total_chunks": len(chunks),
                 "sections_found": len(parsing_state.completed_sections),
                 "elements_found": sum(len(section.elements or []) for section in parsing_state.completed_sections),
-                "chunk_size": self.chunker.chunk_size,
-                "chunk_overlap": self.chunker.chunk_overlap
+                "chunking_strategy": "delimiter",
+                "delimiter_used": "***",
+                "structure_map": structure_map,
+                "checkpoint_info": self.checkpoint_manager.get_checkpoint_summary() if self.checkpoint_manager else None
             },
             chunks_processed=len(chunks),
             sections_found=len(parsing_state.completed_sections),
@@ -410,7 +495,3 @@ class MarkdownChunkProcessor:
             self.file_handler.save_results(result, file_path, output_dir, monitor_report)
         
         return result
-    
-    def get_partial_report(self) -> Optional[PartialReport]:
-        """Get the current partial report for monitoring."""
-        return self.monitor.get_current_report()

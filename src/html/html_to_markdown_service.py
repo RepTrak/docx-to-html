@@ -42,22 +42,22 @@ class HtmlToMarkdownService:
             # Document processing - preserve original structure
             extract_metadata=True,  # Extract metadata as comment header
             convert_as_inline=False,  # Treat as block-level content
-            strip_newlines=False,  # Preserve original newlines
+            strip_newlines=True,  # Preserve original newlines
             # Formatting options - match common HTML styling
             heading_style="atx",  # Use # style headers (closest to HTML h1-h6)
             strong_em_symbol="*",  # Use * for bold/italic (standard markdown)
-            bullets="*+-",  # Support multiple bullet styles
+            bullets="-",  # Support multiple bullet styles
             highlight_style="double-equal",  # Use == for highlighted text
             # Text processing - preserve formatting
-            wrap=False,  # Don't wrap text to preserve original line breaks
-            escape_asterisks=True,  # Escape * characters in content
-            escape_underscores=True,  # Escape _ characters in content
-            escape_misc=True,  # Escape other special characters
+            # wrap=True,  # Don't wrap text to preserve original line breaks
+            # escape_asterisks=True,  # Escape * characters in content
+            # escape_underscores=True,  # Escape _ characters in content
+            # escape_misc=True,  # Escape other special characters
             # Code blocks - preserve code formatting
-            code_language="",  # Don't assume language for code blocks
+            # code_language="",  # Don't assume language for code blocks
             # Memory efficiency for large documents
-            stream_processing=False,  # Use standard processing for better control
-            chunk_size=1024,  # Chunk size if streaming needed
+            # stream_processing=False,  # Use standard processing for better control
+            # chunk_size=1024,  # Chunk size if streaming needed
         )
         
         # Post-process to clean up while preserving structure
