@@ -15,16 +15,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """
-    OPENAI_API_KEY=
-QDRANT_URL=http://localhost:6333
-EMBEDDING_MODEL=text-embedding-3-small
-CHUNK_SIZE=1024
-CHUNK_OVERLAP=20
-GROQ_API_KEY=
-ANTHROPIC_API_KEY=
-
-    """
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8')
     ANTHROPIC_API_KEY: str = Field(
         default="",
@@ -53,6 +43,14 @@ ANTHROPIC_API_KEY=
     GROQ_API_KEY: str = Field(
         default="",
         description="GROQ API key for accessing the GROQ API.",
+    )
+    BASE_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="Base model to use for LLM completions.",
+    )
+    MAIN_PROVIDER: str = Field(
+        default="openai",
+        description="Main LLM provider to use for completions.",
     )
     
 settings = Settings()

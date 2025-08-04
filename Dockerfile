@@ -27,4 +27,8 @@ RUN pip3 install -r requirements-dev.txt
 # Create directories for input/output
 RUN mkdir -p /input /output
 
-RUN chmod +x ./scripts/convert.sh
+# Expose Streamlit port
+EXPOSE 8080
+
+# Run Streamlit app with development settings
+CMD ["streamlit", "run", "app.py", "--server.runOnSave=true", "--server.allowRunOnSave=true", "--server.address=0.0.0.0", "--server.port=8080"]
