@@ -9,8 +9,8 @@
       "type": {
         "type": "string",
         "enum": [
-          "CHOICE", "LONG_TEXT", "SCREENER", "BREAK_PAGE",
-          "COUNTRY_DROPDOWN", "RATING", "GRID", "NUMBER", "DATE"
+          "CHOICE", "OPEN_END", "SCREENER", "BREAK_PAGE",
+          "COUNTRY_DROPDOWN", "AGE_ORI", "S105_RATING_FAMILIARITY", "GEOGRAPHIC_AREA_REGION", "PULSE_FILTER", "YES_NO", "EDUCATION_STANDARD", "INCOME_STANDARD"
         ]
       },
       "position": { "type": "integer" },
@@ -25,8 +25,8 @@
           "element_type": {
             "type": "string",
             "enum": [
-              "CHOICE", "LONG_TEXT", "SCREENER", "BREAK_PAGE",
-              "COUNTRY_DROPDOWN", "RATING", "GRID", "NUMBER", "DATE"
+              "CHOICE", "OPEN_END", "SCREENER", "BREAK_PAGE",
+              "COUNTRY_DROPDOWN", "AGE_ORI", "S105_RATING_FAMILIARITY", "GEOGRAPHIC_AREA_REGION", "PULSE_FILTER", "YES_NO", "EDUCATION_STANDARD", "INCOME_STANDARD"
             ]
           },
           "required": { "type": "boolean" },
@@ -40,7 +40,21 @@
           "regex": { "type": ["string", "null"] },
           "na_checkbox": { "type": "boolean" },
           "na_label": { "type": ["string", "null"] },
-          "na_code": { "type": ["string", "integer", "null"] }
+          "na_code": { "type": ["string", "integer", "null"] },          
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["code", "label", "position"],
+              "properties": {
+                "code": { "type": ["string", "integer"] },
+                "label": { "type": "string" },
+                "position": { "type": "integer" },
+                "notes": { "type": ["string", "null"] }
+              },
+              "additionalProperties": false
+            }
+          }
         },
         "required": ["element_type"],
         "additionalProperties": true
@@ -72,7 +86,10 @@
                 "keep_position_in_randomize": { "type": "boolean" },
                 "element_type": {
                   "type": "string",
-                  "enum": ["CHOICE", "GRID", "RATING"]
+                  "enum": [
+                    "CHOICE", "OPEN_END", "SCREENER", "BREAK_PAGE",
+                    "COUNTRY_DROPDOWN", "AGE_ORI", "S105_RATING_FAMILIARITY", "GEOGRAPHIC_AREA_REGION", "PULSE_FILTER", "YES_NO", "EDUCATION_STANDARD", "INCOME_STANDARD"
+                  ]
                 },
                 "exclude_other_variables": { "type": "boolean" }
               },
